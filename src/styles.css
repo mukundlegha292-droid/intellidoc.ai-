@@ -1,0 +1,292 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * IntelliDoc AI design system.
+ * Black canvas, electric blue neon, glass surfaces.
+ * All colors are oklch. Never hardcode colors in components.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 12px);
+  --radius-3xl: calc(var(--radius) + 20px);
+  --radius-4xl: calc(var(--radius) + 32px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-glow: var(--primary-glow);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-hairline: var(--hairline);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --ease-luxe: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root {
+  --radius: 1.25rem;
+
+  --background: oklch(0.14 0.014 264);
+  --foreground: oklch(0.97 0.005 250);
+
+  --card: oklch(0.185 0.018 264);
+  --card-foreground: oklch(0.97 0.005 250);
+  --popover: oklch(0.18 0.018 264);
+  --popover-foreground: oklch(0.97 0.005 250);
+
+  --primary: oklch(0.68 0.19 253);
+  --primary-foreground: oklch(0.13 0.02 264);
+  --primary-glow: oklch(0.8 0.16 220);
+
+  --secondary: oklch(0.24 0.02 264);
+  --secondary-foreground: oklch(0.96 0.005 250);
+
+  --muted: oklch(0.23 0.018 264);
+  --muted-foreground: oklch(0.68 0.02 260);
+
+  --accent: oklch(0.28 0.05 258);
+  --accent-foreground: oklch(0.97 0.005 250);
+
+  --destructive: oklch(0.62 0.22 22);
+  --destructive-foreground: oklch(0.98 0.005 250);
+
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.68 0.19 253 / 55%);
+
+  --surface: oklch(1 0 0 / 4%);
+  --surface-strong: oklch(1 0 0 / 8%);
+  --hairline: oklch(1 0 0 / 12%);
+
+  --chart-1: oklch(0.68 0.19 253);
+  --chart-2: oklch(0.8 0.16 220);
+  --chart-3: oklch(0.72 0.14 190);
+  --chart-4: oklch(0.62 0.16 285);
+  --chart-5: oklch(0.85 0.09 240);
+
+  --sidebar: oklch(0.17 0.018 264);
+  --sidebar-foreground: oklch(0.96 0.005 250);
+  --sidebar-primary: oklch(0.68 0.19 253);
+  --sidebar-primary-foreground: oklch(0.13 0.02 264);
+  --sidebar-accent: oklch(0.24 0.02 264);
+  --sidebar-accent-foreground: oklch(0.96 0.005 250);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.68 0.19 253 / 55%);
+
+  --gradient-aurora: radial-gradient(
+      60% 60% at 50% 0%,
+      color-mix(in oklab, var(--primary) 38%, transparent) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      40% 50% at 85% 30%,
+      color-mix(in oklab, var(--primary-glow) 22%, transparent) 0%,
+      transparent 70%
+    );
+  --gradient-neon-edge: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--primary) 70%, transparent),
+    color-mix(in oklab, var(--primary-glow) 45%, transparent) 45%,
+    transparent 85%
+  );
+  --gradient-glass: linear-gradient(
+    155deg,
+    oklch(1 0 0 / 9%) 0%,
+    oklch(1 0 0 / 3%) 40%,
+    oklch(1 0 0 / 1%) 100%
+  );
+  --gradient-text: linear-gradient(
+    100deg,
+    var(--foreground) 12%,
+    var(--primary-glow) 55%,
+    var(--primary) 92%
+  );
+
+  --shadow-neon: 0 0 0 1px color-mix(in oklab, var(--primary) 25%, transparent),
+    0 18px 60px -18px color-mix(in oklab, var(--primary) 55%, transparent);
+  --shadow-float: 0 40px 90px -40px oklch(0 0 0 / 85%),
+    0 8px 30px -12px oklch(0 0 0 / 55%);
+  --shadow-inset-glass: inset 0 1px 0 0 oklch(1 0 0 / 10%),
+    inset 0 -1px 0 0 oklch(1 0 0 / 3%);
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+}
+
+@utility glass-panel {
+  background-image: var(--gradient-glass);
+  background-color: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-float), var(--shadow-inset-glass);
+  backdrop-filter: blur(28px) saturate(140%);
+}
+
+@utility neon-ring {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--gradient-neon-edge);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+@utility aurora {
+  background-image: var(--gradient-aurora);
+}
+
+@utility text-gradient {
+  background-image: var(--gradient-text);
+  background-clip: text;
+  color: transparent;
+}
+
+@utility grain {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+@utility hairline-grid {
+  background-image: linear-gradient(to right, var(--surface) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--surface) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@utility animate-float-slow {
+  animation: float-slow 7s var(--ease-luxe) infinite;
+}
+
+@utility animate-pulse-glow {
+  animation: pulse-glow 4s ease-in-out infinite;
+}
+
+@utility animate-marquee {
+  animation: marquee 38s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
