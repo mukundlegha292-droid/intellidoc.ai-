@@ -96,7 +96,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
         rel: "preconnect",
-        href: "https://fonts.gstatic.com",
+        href: "https://fonts.googleapis.com",
         crossOrigin: "anonymous",
       },
       {
@@ -129,6 +129,37 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window);
+    const marker = "__intelliDocUrlProxyInstalled";
+    const win = window as Window & { [key: string]: unknown };
+    if (win[marker]) return;
+    win[marker] = true;
+
+    window.fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const requestUrl = new URL(request.url, window.location.origin);
+      const accept = request.headers.get("accept") || "";
+      const shouldProxy = request.method === "GET" && requestUrl.origin !== window.location.origin && /text\/html|application\/xhtml\+xml|application\/pdf|text\/plain|application\/json/i.test(accept);
+
+      if (shouldProxy) {
+        try {
+          const proxied = await originalFetch(`/api/import-url?url=${encodeURIComponent(requestUrl.toString())}`, { headers: { Accept: accept } });
+          if (proxied.ok) return proxied;
+        } catch {
+          // Fall back to the original request below.
+        }
+      }
+      return originalFetch(input, init);
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+      delete win[marker];
+    };
+  }, []);
+
   const isProductWorkspace = [
     "/ai-workspace",
     "/document-ingest",
