@@ -109,7 +109,7 @@ async function importUrl(url: string, status: (text: string) => void): Promise<E
   if (contentType.includes("text/html") || /<html|<body|<article/i.test(raw)) {
     const doc = new DOMParser().parseFromString(raw, "text/html");
     doc.querySelectorAll("script,style,noscript,svg").forEach((node) => node.remove());
-    return { text: (doc.body?.innerText ?? doc.documentElement.textContent ?? "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(), meta: parsed.hostname, note: "Web page text imported" };
+    const pageTitle = (doc.title || parsed.hostname).replace(/\s*[-|]\s*YouTube\s*$/i, "").trim() || parsed.hostname; return { text: (doc.body?.innerText ?? doc.documentElement.textContent ?? "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(), meta: pageTitle, note: "Web page text imported" };
   }
   return { text: raw.trim(), meta: parsed.hostname, note: "URL text imported" };
 }
@@ -154,7 +154,7 @@ function AIWorkspacePage() {
     const value = url.trim();
     if (!value) return;
     setProcessing(true); setError(""); setStatus("Validating URL…");
-    try { const parsed = new URL(value); processResult(await importUrl(value, setStatus), parsed.hostname + parsed.pathname); setShowUrl(false); }
+    try { const parsed = new URL(value); const result = await importUrl(value, setStatus); processResult(result, result.meta || parsed.hostname + parsed.pathname); setShowUrl(false); }
     catch (e) { console.error(e); setStatus("URL import failed"); setError("This URL could not be imported. The site may block browser access (CORS); server-side URL fetching will remove this limitation in the next backend layer."); }
     finally { setProcessing(false); }
   };
