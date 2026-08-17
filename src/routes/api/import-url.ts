@@ -19,14 +19,37 @@ function validateUrl(rawUrl: string) {
   return parsed;
 }
 
-function cleanHtml(html: string) {
-  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/\s+/g, " ").trim();
+function decodeEntities(value: string) {
+  return value.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'");
 }
 
-function getTitle(html: string, fallback: string) {
-  return html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || fallback;
+function cleanHtml(html: string) {
+  return decodeEntities(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<header[\s\S]*?<\/header>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getMetaContent(html: string, selector: string) {
+  return html.match(selector)?.[1]?.replace(/\s+/g, " ").trim() || "";
+}
+
+function getTitle(html: string, hostname: string) {
+  const siteName =
+    getMetaContent(html, /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i) ||
+    getMetaContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:site_name["']/i);
+  const ogTitle =
+    getMetaContent(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+    getMetaContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || "";
+  return siteName || ogTitle || title || hostname.replace(/^www\./i, "").split(".")[0];
 }
 
 async function fetchWithLimit(url: string) {
@@ -73,11 +96,20 @@ export const Route = createFileRoute("/api/import-url")({
         try {
           const rawUrl = new URL(request.url).searchParams.get("url")?.trim() || "";
           if (!rawUrl) return new Response("URL is required.", { status: 400 });
-          const { response, bytes } = await resolveSource(rawUrl);
+          const { response, bytes, parsed, contentType, text, url } = await resolveSource(rawUrl);
           const headers = new Headers();
-          headers.set("content-type", response.headers.get("content-type") || "application/octet-stream");
           headers.set("cache-control", "no-store");
           headers.set("access-control-allow-origin", "*");
+          if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml") || text.trimStart().startsWith("<!doctype html") || text.trimStart().startsWith("<html")) {
+            const title = getTitle(text, parsed.hostname);
+            const cleaned = cleanHtml(text);
+            headers.set("content-type", "text/html; charset=utf-8");
+            headers.set("x-intellidoc-title", title);
+            headers.set("x-intellidoc-source-url", url);
+            const html = `<!doctype html><html><head><title>${decodeEntities(title)}</title></head><body><main>${decodeEntities(cleaned)}</main></body></html>`;
+            return new Response(html, { status: 200, headers });
+          }
+          headers.set("content-type", response.headers.get("content-type") || "application/octet-stream");
           return new Response(bytes, { status: 200, headers });
         } catch (error) {
           return new Response(error instanceof Error ? error.message : "Unable to import this URL.", { status: 502 });
