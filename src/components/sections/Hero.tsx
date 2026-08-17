@@ -89,11 +89,11 @@ export function Hero() {
             transition={{ duration: 0.9, delay: 0.43, ease }}
             className="mt-9 flex flex-wrap items-center gap-3"
           >
-            <NeonButton to="/pricing" size="lg">
+            <NeonButton to="/ai-workspace" size="lg">
               Start free
               <ArrowRight className="size-4 transition-transform duration-500 group-hover:translate-x-1" />
             </NeonButton>
-            <NeonButton to="/product" variant="glass" size="lg">
+            <NeonButton to="/ai-workspace" variant="glass" size="lg">
               Explore workspace
             </NeonButton>
           </motion.div>
