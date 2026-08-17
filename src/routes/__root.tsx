@@ -129,17 +129,19 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const isWorkspace = pathname === "/company";
+  const isProductWorkspace = [
+    "/ai-workspace",
+    "/document-ingest",
+    "/startup-pitch",
+  ].includes(pathname);
 
   return (
     <QueryClientProvider client={queryClient}>
       <div className="relative min-h-screen bg-background text-foreground">
-        {!isWorkspace && <Nav />}
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        {!isProductWorkspace && <Nav />}
         <Outlet />
-        {!isWorkspace && <Footer />}
+        {!isProductWorkspace && <Footer />}
       </div>
     </QueryClientProvider>
   );
 }
-
