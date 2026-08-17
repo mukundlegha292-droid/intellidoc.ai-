@@ -1,0 +1,117 @@
+name: Fix URL title resolution
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-youtube-title.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Patch URL importer
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          api = Path('src/routes/api/import-url.ts')
+          s = api.read_text()
+
+          helper = r'''
+async function getYouTubeTitle(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isYouTube = host === "youtu.be" || host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com");
+    if (!isYouTube) return "";
+    const oembed = `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`;
+    const response = await fetch(oembed, { headers: { "user-agent": "IntelliDocAI/1.0" } });
+    if (!response.ok) return "";
+    const data = await response.json().catch(() => ({}));
+    return typeof data?.title === "string" ? data.title.trim() : "";
+  } catch {
+    return "";
+  }
+}
+'''
+
+          if 'async function getYouTubeTitle' not in s:
+              marker = '\nasync function fetchWithLimit'
+              s = s.replace(marker, helper + marker, 1)
+
+          s = s.replace(
+              'const { contentType, text, url, parsed } = await resolveSource(rawUrl);',
+              'const { contentType, text, url, parsed } = await resolveSource(rawUrl);\n          const youtubeTitle = await getYouTubeTitle(rawUrl);',
+              1,
+          )
+
+          s = s.replace(
+              'return Response.json({ title: getTitle(text, parsed.hostname), text: cleaned, sourceUrl: url, contentType: contentType || "text/html", note: cleaned ? "Web page text imported server-side" : "The page returned no readable text." });',
+              'return Response.json({ title: youtubeTitle || getTitle(text, parsed.hostname), text: cleaned, sourceUrl: url, contentType: contentType || "text/html", note: cleaned ? "Web page text imported server-side" : "The page returned no readable text." });',
+              1,
+          )
+
+          api.write_text(s)
+
+          ui = Path('src/routes/ai-workspace.tsx')
+          u = ui.read_text()
+
+          new_import = r'''async function importUrl(url: string, status: (text: string) => void): Promise<Extracted> {
+  const parsed = new URL(url);
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are supported.");
+  status("Fetching URL…");
+  const response = await fetch("/api/import-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: parsed.toString() }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || `URL returned ${response.status}.`);
+  return {
+    text: typeof data?.text === "string" ? data.text : "",
+    meta: typeof data?.title === "string" && data.title.trim() ? data.title.trim() : parsed.hostname,
+    note: typeof data?.note === "string" ? data.note : "URL imported",
+  };
+}
+'''
+
+          u = re.sub(r'async function importUrl\([\s\S]*?\n}\n\nexport const Route', new_import + '\nexport const Route', u, count=1)
+          u = re.sub(r'  const handleUrl = async \(\) => \{[\s\S]*?\n  \};\n\n  const ask', '''  const handleUrl = async () => {
+    const value = url.trim();
+    if (!value) return;
+    setProcessing(true); setError(""); setStatus("Fetching URL…");
+    try {
+      const result = await importUrl(value, setStatus);
+      processResult(result, result.meta || new URL(value).hostname);
+      setShowUrl(false);
+    } catch (e) {
+      console.error(e);
+      setStatus("URL import failed");
+      setError(e instanceof Error ? e.message : "This URL could not be imported.");
+    } finally { setProcessing(false); }
+  };
+
+  const ask''', u, count=1)
+          ui.write_text(u)
+          PY
+      - name: Commit fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/api/import-url.ts src/routes/ai-workspace.tsx
+          git diff --cached --quiet || git commit -m 'fix URL import to use resolved page titles [skip title fix]'
+          git push
+      - name: Remove one-time workflow
+        run: |
+          git rm .github/workflows/fix-youtube-title.yml
+          git commit -m 'remove one-time title fix workflow [skip title fix]'
+          git push
