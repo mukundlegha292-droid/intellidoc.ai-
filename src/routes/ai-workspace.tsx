@@ -98,20 +98,18 @@ async function importUrl(url: string, status: (text: string) => void): Promise<E
   const parsed = new URL(url);
   if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are supported.");
   status("Fetching URL…");
-  const response = await fetch(parsed.toString(), { headers: { Accept: "text/html,application/pdf,text/plain,application/json" } });
-  if (!response.ok) throw new Error(`URL returned ${response.status}.`);
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/pdf") || parsed.pathname.toLowerCase().endsWith(".pdf")) {
-    const blob = await response.blob();
-    return extractFile(new File([blob], parsed.pathname.split("/").pop() || "imported.pdf", { type: "application/pdf" }), status);
-  }
-  const raw = await response.text();
-  if (contentType.includes("text/html") || /<html|<body|<article/i.test(raw)) {
-    const doc = new DOMParser().parseFromString(raw, "text/html");
-    doc.querySelectorAll("script,style,noscript,svg").forEach((node) => node.remove());
-    const pageTitle = (doc.title || parsed.hostname).replace(/\s*[-|]\s*YouTube\s*$/i, "").trim() || parsed.hostname; return { text: (doc.body?.innerText ?? doc.documentElement.textContent ?? "").replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(), meta: pageTitle, note: "Web page text imported" };
-  }
-  return { text: raw.trim(), meta: parsed.hostname, note: "URL text imported" };
+  const response = await fetch("/api/import-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: parsed.toString() }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || `URL returned ${response.status}.`);
+  return {
+    text: typeof data?.text === "string" ? data.text : "",
+    meta: typeof data?.title === "string" && data.title.trim() ? data.title.trim() : parsed.hostname,
+    note: typeof data?.note === "string" ? data.note : "URL imported",
+  };
 }
 
 export const Route = createFileRoute("/ai-workspace")({
@@ -151,13 +149,19 @@ function AIWorkspacePage() {
   };
 
   const handleUrl = async () => {
-    const value = url.trim();
-    if (!value) return;
-    setProcessing(true); setError(""); setStatus("Validating URL…");
-    try { const parsed = new URL(value); const result = await importUrl(value, setStatus); processResult(result, result.meta || parsed.hostname + parsed.pathname); setShowUrl(false); }
-    catch (e) { console.error(e); setStatus("URL import failed"); setError("This URL could not be imported. The site may block browser access (CORS); server-side URL fetching will remove this limitation in the next backend layer."); }
-    finally { setProcessing(false); }
-  };
+  const value = url.trim();
+  if (!value) return;
+  setProcessing(true); setError(""); setStatus("Fetching URL…");
+  try {
+    const result = await importUrl(value, setStatus);
+    processResult(result, result.meta || new URL(value).hostname);
+    setShowUrl(false);
+  } catch (e) {
+    console.error(e);
+    setStatus("URL import failed");
+    setError(e instanceof Error ? e.message : "This URL could not be imported.");
+  } finally { setProcessing(false); }
+};
 
   const ask = (text = question) => {
     const q = text.trim(); if (!q) return;

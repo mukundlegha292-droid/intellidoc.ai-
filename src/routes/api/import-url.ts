@@ -52,6 +52,22 @@ function getTitle(html: string, hostname: string) {
   return siteName || ogTitle || title || hostname.replace(/^www\./i, "").split(".")[0];
 }
 
+async function getYouTubeTitle(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isYouTube = host === "youtu.be" || host === "www.youtube.com" || host === "youtube.com" || host.endsWith(".youtube.com");
+    if (!isYouTube) return "";
+    const oembed = `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`;
+    const response = await fetch(oembed, { headers: { "user-agent": "IntelliDocAI/1.0" } });
+    if (!response.ok) return "";
+    const data = await response.json().catch(() => ({}));
+    return typeof data?.title === "string" ? data.title.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 async function fetchWithLimit(url: string) {
   let current = validateUrl(url);
   for (let redirect = 0; redirect < 4; redirect += 1) {
@@ -121,9 +137,10 @@ export const Route = createFileRoute("/api/import-url")({
           const rawUrl = typeof body?.url === "string" ? body.url.trim() : "";
           if (!rawUrl) return Response.json({ error: "URL is required." }, { status: 400 });
           const { contentType, text, url, parsed } = await resolveSource(rawUrl);
+          const youtubeTitle = await getYouTubeTitle(rawUrl);
           if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml") || text.trimStart().startsWith("<!doctype html") || text.trimStart().startsWith("<html")) {
             const cleaned = cleanHtml(text);
-            return Response.json({ title: getTitle(text, parsed.hostname), text: cleaned, sourceUrl: url, contentType: contentType || "text/html", note: cleaned ? "Web page text imported server-side" : "The page returned no readable text." });
+            return Response.json({ title: youtubeTitle || getTitle(text, parsed.hostname), text: cleaned, sourceUrl: url, contentType: contentType || "text/html", note: cleaned ? "Web page text imported server-side" : "The page returned no readable text." });
           }
           if (contentType.includes("text/plain") || contentType.includes("application/json")) {
             return Response.json({ title: parsed.hostname, text: text.trim(), sourceUrl: url, contentType: contentType || "text/plain", note: "Text content imported server-side" });
