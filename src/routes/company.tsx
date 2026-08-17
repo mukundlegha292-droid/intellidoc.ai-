@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  CheckCircle2,
   ChevronRight,
   Clock3,
   Command,
@@ -47,6 +48,13 @@ type NavItem = {
   icon: typeof LayoutDashboard;
 };
 
+type DocumentRow = {
+  name: string;
+  meta: string;
+  status: "Processed" | "Processing" | "Ready";
+  type: string;
+};
+
 const navItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard },
   { label: "Documents", icon: FileText },
@@ -55,7 +63,7 @@ const navItems: NavItem[] = [
   { label: "Analytics", icon: BarChart3 },
 ];
 
-const documents = [
+const seedDocuments: DocumentRow[] = [
   {
     name: "Q3 Financial Report.pdf",
     meta: "12 pages · 2 mins ago",
@@ -74,6 +82,12 @@ const documents = [
     status: "Processing",
     type: "PDF",
   },
+  {
+    name: "Operations Playbook.docx",
+    meta: "19 pages · Yesterday",
+    status: "Processed",
+    type: "DOCX",
+  },
 ];
 
 const quickActions = [
@@ -81,25 +95,25 @@ const quickActions = [
     title: "AI Summary",
     description: "Extract the important points in seconds.",
     icon: Sparkles,
-    accent: "from-primary/30 to-primary-glow/10",
+    accent: "from-primary/25 to-primary-glow/5",
   },
   {
     title: "AI Chat",
     description: "Ask questions across your documents.",
     icon: MessageSquare,
-    accent: "from-primary-glow/20 to-primary/10",
+    accent: "from-primary-glow/20 to-primary/5",
   },
   {
     title: "Document Analysis",
     description: "Find patterns, risks and key decisions.",
     icon: Activity,
-    accent: "from-chart-3/20 to-primary/10",
+    accent: "from-chart-3/20 to-primary/5",
   },
   {
     title: "Generate Report",
     description: "Turn document intelligence into a report.",
     icon: FileBarChart,
-    accent: "from-chart-4/20 to-primary/10",
+    accent: "from-chart-4/20 to-primary/5",
   },
 ];
 
@@ -128,38 +142,72 @@ function StatCard({
   );
 }
 
+function StatusPill({ status }: { status: DocumentRow["status"] }) {
+  const isDone = status === "Processed";
+  const isProcessing = status === "Processing";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium",
+        isDone && "border-chart-3/20 bg-chart-3/8 text-chart-3",
+        isProcessing && "border-primary/20 bg-primary/8 text-primary-glow",
+        !isDone && !isProcessing && "border-hairline bg-surface-strong text-muted-foreground",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          isDone && "bg-chart-3",
+          isProcessing && "bg-primary-glow animate-[pulse-glow_1.7s_ease-in-out_infinite]",
+          !isDone && !isProcessing && "bg-muted-foreground",
+        )}
+      />
+      {status}
+    </span>
+  );
+}
+
 function CompanyPage() {
   const [active, setActive] = useState("Dashboard");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<DocumentRow[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredDocuments = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const allDocs = [
-      ...uploadedFiles.map((name) => ({
-        name,
-        meta: "Uploaded just now",
-        status: "Ready",
-        type: "FILE",
-      })),
-      ...documents,
-    ];
+    const allDocs = [...uploadedFiles, ...seedDocuments];
     if (!needle) return allDocs;
     return allDocs.filter((doc) => doc.name.toLowerCase().includes(needle));
   }, [query, uploadedFiles]);
 
   const flash = (message: string) => {
     setNotice(message);
-    window.setTimeout(() => setNotice(""), 2800);
+    window.setTimeout(() => setNotice(""), 3000);
   };
 
   const handleUpload = (files: FileList | null) => {
     if (!files?.length) return;
-    const names = Array.from(files).map((file) => file.name).slice(0, 5);
-    setUploadedFiles((current) => [...names, ...current].slice(0, 5));
-    flash(`${names.length} document${names.length > 1 ? "s" : ""} added to your workspace.`);
+
+    const nextFiles: DocumentRow[] = Array.from(files)
+      .slice(0, 5)
+      .map((file) => ({
+        name: file.name,
+        meta: "Uploaded just now · AI processing queued",
+        status: "Ready",
+        type: file.name.split(".").pop()?.toUpperCase() || "FILE",
+      }));
+
+    setUploadedFiles((current) => [...nextFiles, ...current].slice(0, 8));
+    flash(`${nextFiles.length} document${nextFiles.length > 1 ? "s" : ""} added to your workspace.`);
+  };
+
+  const navigate = (label: string) => {
+    setActive(label);
+    if (label !== "Dashboard") {
+      flash(`${label} is now selected — the workspace panel is ready for the next build.`);
+    }
   };
 
   return (
@@ -169,6 +217,21 @@ function CompanyPage() {
         <div className="absolute right-[-14rem] top-20 size-[34rem] rounded-full bg-primary-glow/8 blur-3xl" />
         <div className="absolute inset-x-0 bottom-0 h-[30rem] bg-[radial-gradient(circle_at_50%_100%,color-mix(in_oklab,var(--primary)_10%,transparent),transparent_60%)]" />
       </div>
+
+      {notice && (
+        <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-primary/20 bg-surface-strong/95 px-4 py-3 text-sm shadow-[0_25px_70px_-30px_color-mix(in_oklab,var(--primary)_80%,transparent)] backdrop-blur-xl">
+          <CheckCircle2 className="size-4 text-chart-3" />
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice("")}
+            className="rounded-lg p-1 text-muted-foreground hover:bg-surface hover:text-foreground"
+            aria-label="Dismiss notification"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="relative flex min-h-screen">
         <aside className="hidden w-[248px] shrink-0 border-r border-hairline bg-sidebar/60 px-4 py-5 backdrop-blur-2xl lg:flex lg:flex-col">
@@ -189,10 +252,7 @@ function CompanyPage() {
               <button
                 key={label}
                 type="button"
-                onClick={() => {
-                  setActive(label);
-                  if (label !== "Dashboard") flash(`${label} workspace is coming next.`);
-                }}
+                onClick={() => navigate(label)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
                   active === label
@@ -212,7 +272,7 @@ function CompanyPage() {
           <nav className="mt-3 space-y-1">
             <button
               type="button"
-              onClick={() => flash("Team sharing is coming next.")}
+              onClick={() => flash("Team sharing is queued for the next workspace release.")}
               className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-surface-strong hover:text-foreground"
             >
               <Users className="size-4" />
@@ -220,7 +280,7 @@ function CompanyPage() {
             </button>
             <button
               type="button"
-              onClick={() => flash("Settings are coming next.")}
+              onClick={() => flash("Workspace settings are queued for the next release.")}
               className="flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-surface-strong hover:text-foreground"
             >
               <Settings className="size-4" />
@@ -246,10 +306,14 @@ function CompanyPage() {
           <div className="mx-auto max-w-[1480px]">
             <header className="glass-panel sticky top-4 z-20 flex flex-wrap items-center gap-3 rounded-3xl px-4 py-3 sm:px-5">
               <div className="flex min-w-[220px] flex-1 items-center gap-3">
-                <div className="flex size-9 items-center justify-center rounded-2xl bg-surface-strong lg:hidden">
+                <a
+                  href="/"
+                  className="flex size-9 items-center justify-center rounded-2xl bg-surface-strong lg:hidden"
+                  aria-label="IntelliDoc AI home"
+                >
                   <Sparkles className="size-4 text-primary-glow" />
-                </div>
-                <div className="relative min-w-0 flex-1 max-w-xl">
+                </a>
+                <div className="relative min-w-0 max-w-2xl flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <input
                     value={query}
@@ -311,7 +375,10 @@ function CompanyPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => flash("AI Chat is ready for the next document you open.")}
+                          onClick={() => {
+                            setActive("AI Workspace");
+                            flash("AI Workspace selected. Open a document to start asking questions.");
+                          }}
                           className="inline-flex h-11 items-center gap-2 rounded-2xl border border-hairline bg-surface px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface-strong"
                         >
                           <Bot className="size-4 text-primary-glow" />
@@ -332,7 +399,9 @@ function CompanyPage() {
                       <div className="absolute -right-10 -top-14 size-44 rounded-full bg-primary/12 blur-2xl" />
                       <div className="absolute inset-x-5 bottom-5 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
                       <div className="relative flex h-full items-center justify-center">
-                        <div className="flex size-28 items-center justify-center rounded-full border border-primary/20 bg-primary/8 shadow-[0_0_70px_color-mix(in_oklab,var(--primary)_25%,transparent)]">
+                        <div className="relative flex size-28 items-center justify-center rounded-full border border-primary/20 bg-primary/8 shadow-[0_0_70px_color-mix(in_oklab,var(--primary)_25%,transparent)]">
+                          <span className="absolute inset-2 rounded-full border border-primary/10" />
+                          <span className="absolute inset-6 rounded-full border border-primary/20" />
                           <div className="flex size-20 items-center justify-center rounded-full border border-primary/20 bg-background/80">
                             <Sparkles className="size-7 text-primary-glow" />
                           </div>
@@ -343,160 +412,202 @@ function CompanyPage() {
                 </div>
 
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <StatCard icon={FolderOpen} label="Total Documents" value="24" trend="+12%" />
-                  <StatCard icon={Zap} label="AI Processed" value="18" trend="+18%" />
-                  <StatCard icon={FileBarChart} label="Reports Generated" value="12" trend="+8%" />
-                  <StatCard icon={Database} label="Storage Used" value="2.4 GB" trend="32% free" />
+                  <StatCard icon={FolderOpen} label="Total Documents" value={`${24 + uploadedFiles.length}`} trend="+12%" />
+                  <StatCard icon={Zap} label="AI Actions" value="186" trend="+28%" />
+                  <StatCard icon={BarChart3} label="Reports Generated" value="32" trend="+18%" />
+                  <StatCard icon={Clock3} label="Time Saved" value="14.6h" trend="+31%" />
                 </div>
 
-                <div className="mt-7">
+                <section className="mt-6 rounded-[2rem] border border-hairline bg-surface/70 p-5 sm:p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
+                        Recent documents
+                      </p>
+                      <h2 className="mt-1 font-display text-xl font-semibold tracking-tight">Your document intelligence hub</h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActive("Documents")}
+                      className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-primary-glow transition-colors hover:bg-primary/8"
+                    >
+                      View all <ChevronRight className="size-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="mt-5 overflow-hidden rounded-2xl border border-hairline">
+                    {filteredDocuments.length === 0 ? (
+                      <div className="flex min-h-36 flex-col items-center justify-center gap-2 px-5 text-center">
+                        <Search className="size-5 text-muted-foreground" />
+                        <p className="text-sm font-medium">No documents found</p>
+                        <p className="text-xs text-muted-foreground">Try a different search term or upload a new document.</p>
+                      </div>
+                    ) : (
+                      filteredDocuments.slice(0, 5).map((doc) => (
+                        <button
+                          key={`${doc.name}-${doc.meta}`}
+                          type="button"
+                          onClick={() => flash(`${doc.name} opened in preview mode.`)}
+                          className="group flex w-full items-center gap-3 border-b border-hairline bg-surface/60 px-4 py-3.5 text-left last:border-b-0 hover:bg-surface-strong"
+                        >
+                          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/7 text-primary-glow">
+                            <FileText className="size-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{doc.name}</span>
+                            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{doc.meta}</span>
+                          </span>
+                          <span className="hidden sm:block"><StatusPill status={doc.status} /></span>
+                          <span className="hidden text-[10px] uppercase tracking-[0.16em] text-muted-foreground md:block">{doc.type}</span>
+                          <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+                <section className="mt-6">
                   <div className="flex items-end justify-between gap-4">
                     <div>
-                      <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-primary-glow">Work faster</p>
-                      <h2 className="mt-2 font-display text-2xl font-semibold">Quick AI actions</h2>
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground/80">AI actions</p>
+                      <h2 className="mt-1 font-display text-xl font-semibold tracking-tight">Move from files to insight</h2>
                     </div>
-                    <span className="hidden text-xs text-muted-foreground sm:block">Built around the next decision you need to make.</span>
+                    <button
+                      type="button"
+                      onClick={() => flash("Create a new workflow from your document library.")}
+                      className="hidden items-center gap-1.5 rounded-xl border border-hairline bg-surface px-3 py-2 text-xs font-medium sm:flex"
+                    >
+                      <Plus className="size-3.5" /> New workflow
+                    </button>
                   </div>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
                     {quickActions.map(({ title: actionTitle, description: actionDescription, icon: Icon, accent }) => (
                       <button
                         key={actionTitle}
                         type="button"
-                        onClick={() => flash(`${actionTitle} is ready to run on your next document.`)}
-                        className="group glass-panel text-left rounded-3xl p-5 transition-all duration-300 hover:-translate-y-1 hover:border-primary/20"
+                        onClick={() => flash(`${actionTitle} is ready for your selected document.`)}
+                        className="group relative overflow-hidden rounded-3xl border border-hairline bg-surface p-5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/20 hover:bg-surface-strong"
                       >
-                        <div className="flex items-start justify-between gap-4">
-                          <span className={cn("flex size-11 items-center justify-center rounded-2xl bg-gradient-to-br ring-1 ring-inset ring-white/6", accent)}>
-                            <Icon className="size-5 text-primary-glow" />
+                        <div className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-r ${accent} opacity-80`} />
+                        <div className="relative flex items-start justify-between gap-4">
+                          <span className="flex size-11 items-center justify-center rounded-2xl border border-primary/15 bg-background/50 text-primary-glow">
+                            <Icon className="size-5" />
                           </span>
-                          <ChevronRight className="mt-1 size-4 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-foreground" />
+                          <MoreHorizontal className="size-4 text-muted-foreground" />
                         </div>
-                        <h3 className="mt-5 font-display text-base font-semibold">{actionTitle}</h3>
-                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{actionDescription}</p>
+                        <div className="relative mt-6">
+                          <h3 className="font-display text-base font-semibold">{actionTitle}</h3>
+                          <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-muted-foreground">{actionDescription}</p>
+                        </div>
+                        <div className="relative mt-5 flex items-center gap-1.5 text-xs font-medium text-primary-glow">
+                          Start action <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                        </div>
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="mt-7 rounded-3xl border border-hairline bg-surface/70 p-5 sm:p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h2 className="font-display text-xl font-semibold">Recent documents</h2>
-                      <p className="mt-1 text-sm text-muted-foreground">Your latest company knowledge, ready for AI.</p>
-                    </div>
-                    <button type="button" onClick={() => flash("Documents page is coming next.")} className="text-sm text-primary-glow hover:underline">
-                      View all
-                    </button>
-                  </div>
-
-                  <div className="mt-5 space-y-2">
-                    {filteredDocuments.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-hairline p-8 text-center text-sm text-muted-foreground">
-                        No documents match “{query}”.
-                      </div>
-                    ) : (
-                      filteredDocuments.slice(0, 7).map((doc) => (
-                        <div key={doc.name} className="group flex flex-wrap items-center gap-3 rounded-2xl p-3 transition-colors hover:bg-surface-strong">
-                          <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-hairline bg-background/70">
-                            <FileText className="size-4 text-primary-glow" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{doc.name}</p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">{doc.meta}</p>
-                          </div>
-                          <span className={cn(
-                            "rounded-full border px-2.5 py-1 text-[10px] font-medium",
-                            doc.status === "Processing"
-                              ? "border-primary/20 bg-primary/8 text-primary-glow"
-                              : "border-chart-3/20 bg-chart-3/8 text-chart-3",
-                          )}>
-                            {doc.status}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => flash(`${doc.name} opened in the document workspace.`)}
-                            className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-background hover:text-foreground"
-                            aria-label={`Open ${doc.name}`}
-                          >
-                            <ChevronRight className="size-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => flash(`More actions for ${doc.name}.`)}
-                            className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-background hover:text-foreground"
-                            aria-label={`More actions for ${doc.name}`}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+                </section>
               </div>
 
-              <aside className="space-y-4 xl:pt-1">
-                <div className="overflow-hidden rounded-3xl border border-primary/15 bg-gradient-to-b from-primary/10 via-surface to-surface p-5 shadow-[0_28px_80px_-55px_color-mix(in_oklab,var(--primary)_80%,transparent)]">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <span className="inline-flex size-10 items-center justify-center rounded-2xl bg-primary/12 text-primary-glow ring-1 ring-primary/15">
-                        <Bot className="size-4" />
-                      </span>
-                      <h2 className="mt-5 font-display text-xl font-semibold">AI Assistant</h2>
-                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Ask anything about the documents in your workspace.</p>
-                    </div>
-                    <span className="mt-1 flex size-2 rounded-full bg-chart-3 shadow-[0_0_16px_color-mix(in_oklab,var(--chart-3)_80%,transparent)]" />
-                  </div>
-
-                  <div className="mt-5 rounded-2xl border border-hairline bg-background/55 p-4">
-                    <p className="text-sm font-medium">Hello Mukund 👋</p>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">What would you like to analyze today?</p>
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {["Summarize a document", "Find key insights", "Compare documents", "Generate report"].map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => flash(`AI Assistant queued: ${prompt}.`)}
-                        className="flex w-full items-center justify-between rounded-2xl border border-hairline bg-surface px-3.5 py-3 text-left text-xs text-muted-foreground transition-colors hover:bg-surface-strong hover:text-foreground"
-                      >
-                        {prompt}
-                        <ChevronRight className="size-3.5" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="glass-panel rounded-3xl p-5">
+              <aside className="space-y-6">
+                <div className="rounded-[2rem] border border-hairline bg-surface/70 p-5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary-glow">Workspace health</p>
-                      <h3 className="mt-2 font-display text-lg font-semibold">Everything looks good</h3>
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground/80">Workspace health</p>
+                      <h2 className="mt-1 font-display text-lg font-semibold">AI is ready</h2>
                     </div>
-                    <div className="flex size-10 items-center justify-center rounded-2xl bg-chart-3/10 text-chart-3">
+                    <span className="flex size-10 items-center justify-center rounded-2xl bg-chart-3/8 text-chart-3 ring-1 ring-chart-3/15">
                       <Activity className="size-4" />
-                    </div>
+                    </span>
                   </div>
-                  <div className="mt-5 space-y-3 text-sm">
-                    <div className="flex items-center justify-between"><span className="text-muted-foreground">Documents synced</span><span>24/24</span></div>
-                    <div className="flex items-center justify-between"><span className="text-muted-foreground">AI services</span><span className="text-chart-3">Operational</span></div>
-                    <div className="flex items-center justify-between"><span className="text-muted-foreground">Last backup</span><span className="inline-flex items-center gap-1.5"><Clock3 className="size-3" /> 14 min</span></div>
+
+                  <div className="mt-5 rounded-2xl border border-hairline bg-background/35 p-4">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Processing capacity</span>
+                      <span className="font-medium">72%</span>
+                    </div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface">
+                      <div className="h-full w-[72%] rounded-full bg-gradient-to-r from-primary to-primary-glow" />
+                    </div>
+                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                      Your workspace can comfortably process another batch of documents today.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-hairline bg-background/25 p-3">
+                      <p className="text-[11px] text-muted-foreground">Processed today</p>
+                      <p className="mt-1 text-lg font-semibold">18</p>
+                    </div>
+                    <div className="rounded-2xl border border-hairline bg-background/25 p-3">
+                      <p className="text-[11px] text-muted-foreground">Queued</p>
+                      <p className="mt-1 text-lg font-semibold">3</p>
+                    </div>
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-hairline bg-surface p-5">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary-glow">
-                      <Plus className="size-4" />
-                    </div>
+                <div className="rounded-[2rem] border border-hairline bg-surface/70 p-5">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium">Need a new workflow?</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">Build the next AI action around your team.</p>
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground/80">Recommended</p>
+                      <h2 className="mt-1 font-display text-lg font-semibold">Try this next</h2>
+                    </div>
+                    <Sparkles className="size-4 text-primary-glow" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => flash("Suggested workflow opened: Executive Summary.")}
+                    className="mt-4 w-full rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/8 to-transparent p-4 text-left transition-colors hover:bg-primary/10"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary-glow">
+                        <FileBarChart className="size-4" />
+                      </span>
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium">Build an executive summary</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      Combine the most important findings from your latest reports into one leadership-ready view.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => flash("Suggested workflow opened: Risk Scan.")}
+                    className="mt-3 w-full rounded-2xl border border-hairline bg-background/25 p-4 text-left transition-colors hover:bg-surface-strong"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex size-10 items-center justify-center rounded-xl bg-surface-strong text-primary-glow">
+                        <Zap className="size-4" />
+                      </span>
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </div>
+                    <p className="mt-4 text-sm font-medium">Run a document risk scan</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      Surface missing clauses, unusual values and items that need a human review.
+                    </p>
+                  </button>
+                </div>
+
+                <div className="rounded-[2rem] border border-primary/15 bg-gradient-to-br from-primary/10 via-surface to-transparent p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-10 items-center justify-center rounded-2xl bg-primary/12 text-primary-glow">
+                      <Bot className="size-4" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold">AI Workspace</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        Your next step is to open a document and start a conversation with the AI.
+                      </p>
                     </div>
                   </div>
-                  <button type="button" onClick={() => flash("Custom AI workflows are planned for the next release.")} className="mt-4 w-full rounded-2xl border border-hairline bg-background/50 py-2.5 text-xs font-medium hover:bg-surface-strong">
-                    Explore workflows
+                  <button
+                    type="button"
+                    onClick={() => setActive("AI Workspace")}
+                    className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary-glow"
+                  >
+                    Open AI Workspace <ChevronRight className="size-3.5" />
                   </button>
                 </div>
               </aside>
@@ -504,18 +615,6 @@ function CompanyPage() {
           </div>
         </section>
       </div>
-
-      {notice && (
-        <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-2xl border border-primary/20 bg-background/90 px-4 py-3 text-sm shadow-2xl backdrop-blur-xl">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary-glow">
-            <Sparkles className="size-3.5" />
-          </span>
-          <p className="flex-1 leading-relaxed text-muted-foreground">{notice}</p>
-          <button type="button" onClick={() => setNotice("")} className="rounded-lg p-1 text-muted-foreground hover:text-foreground" aria-label="Dismiss notification">
-            <X className="size-3.5" />
-          </button>
-        </div>
-      )}
     </main>
   );
 }
