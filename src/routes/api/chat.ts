@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.6";
 const MAX_SOURCE_CHARS = 120_000;
 const MAX_QUESTION_CHARS = 8_000;
 
@@ -47,10 +47,7 @@ export const Route = createFileRoute("/api/chat")({
               "Content-Type": "application/json",
               Authorization: `Bearer ${apiKey}`,
             },
-            body: JSON.stringify({
-              model: MODEL,
-              input,
-            }),
+            body: JSON.stringify({ model: MODEL, input }),
           });
 
           const data = await response.json().catch(() => ({}));
@@ -72,5 +69,3 @@ export const Route = createFileRoute("/api/chat")({
     },
   },
 });
-
-// AI chat endpoint: server-side only; never expose OPENAI_API_KEY to the browser.
