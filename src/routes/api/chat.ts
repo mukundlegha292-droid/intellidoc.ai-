@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+const MODEL = "gemini-3.6-flash";
 const MAX_SOURCE_CHARS = 120_000;
 const MAX_QUESTION_CHARS = 8_000;
 
