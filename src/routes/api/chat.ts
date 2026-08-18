@@ -72,3 +72,5 @@ export const Route = createFileRoute("/api/chat")({
     },
   },
 });
+
+// AI chat endpoint: server-side only; never expose OPENAI_API_KEY to the browser.
