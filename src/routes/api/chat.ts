@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5.6";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const MAX_SOURCE_CHARS = 120_000;
 const MAX_QUESTION_CHARS = 8_000;
 
@@ -13,10 +13,10 @@ export const Route = createFileRoute("/api/chat")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          const apiKey = process.env.AI_API_KEY;
+          const apiKey = process.env.GEMINI_API_KEY;
           if (!apiKey) {
             return Response.json(
-              { error: "AI is not configured yet. Add AI_API_KEY to the Vercel environment variables." },
+              { error: "AI is not configured yet. Add GEMINI_API_KEY to the Vercel environment variables." },
               { status: 503 },
             );
           }
@@ -39,31 +39,51 @@ export const Route = createFileRoute("/api/chat")({
             "Use concise, useful formatting and preserve important numbers, names, dates, and caveats.",
           ].join("\n");
 
-          const input = `${system}\n\nSOURCE CONTENT:\n${source}\n\nUSER QUESTION:\n${question}`;
+          const prompt = `${system}\n\nSOURCE CONTENT:\n${source}\n\nUSER QUESTION:\n${question}`;
 
-          const response = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-goog-api-key": apiKey,
+              },
+              body: JSON.stringify({
+                contents: [{
+                  role: "user",
+                  parts: [{ text: prompt }],
+                }],
+              }),
             },
-            body: JSON.stringify({ model: MODEL, input }),
-          });
+          );
 
           const data = await response.json().catch(() => ({}));
           if (!response.ok) {
             return Response.json(
-              { error: typeof data?.error?.message === "string" ? data.error.message : `AI request failed with ${response.status}.` },
+              {
+                error:
+                  typeof data?.error?.message === "string"
+                    ? data.error.message
+                    : `Gemini request failed with ${response.status}.`,
+              },
               { status: 502 },
             );
           }
 
-          const answer = typeof data?.output_text === "string" ? data.output_text.trim() : "";
-          if (!answer) return Response.json({ error: "The AI returned an empty response." }, { status: 502 });
+          const answer = data?.candidates?.[0]?.content?.parts
+            ?.map((part: { text?: string }) => (typeof part?.text === "string" ? part.text : ""))
+            .join("\n")
+            .trim();
+
+          if (!answer) return Response.json({ error: "Gemini returned an empty response." }, { status: 502 });
 
           return Response.json({ answer, model: MODEL });
         } catch (error) {
-          return Response.json({ error: error instanceof Error ? error.message : "Unable to generate an AI response." }, { status: 500 });
+          return Response.json(
+            { error: error instanceof Error ? error.message : "Unable to generate an AI response." },
+            { status: 500 },
+          );
         }
       },
     },
