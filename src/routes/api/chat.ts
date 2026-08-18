@@ -13,10 +13,10 @@ export const Route = createFileRoute("/api/chat")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          const apiKey = process.env.OPENAI_API_KEY;
+          const apiKey = process.env.AI_API_KEY;
           if (!apiKey) {
             return Response.json(
-              { error: "AI is not configured yet. Add OPENAI_API_KEY to the production environment." },
+              { error: "AI is not configured yet. Add AI_API_KEY to the Vercel environment variables." },
               { status: 503 },
             );
           }
