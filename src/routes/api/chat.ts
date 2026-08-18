@@ -3,9 +3,14 @@ import { createFileRoute } from "@tanstack/react-router";
 const MODEL = "gemini-3.6-flash";
 const MAX_SOURCE_CHARS = 120_000;
 const MAX_QUESTION_CHARS = 8_000;
+const MAX_RETRIES = 3;
 
 function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export const Route = createFileRoute("/api/chat")({
@@ -40,32 +45,44 @@ export const Route = createFileRoute("/api/chat")({
           ].join("\n");
 
           const prompt = `${system}\n\nSOURCE CONTENT:\n${source}\n\nUSER QUESTION:\n${question}`;
+          let response: Response | null = null;
+          let data: any = {};
 
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-goog-api-key": apiKey,
+          for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+            response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-goog-api-key": apiKey,
+                },
+                body: JSON.stringify({
+                  contents: [{
+                    role: "user",
+                    parts: [{ text: prompt }],
+                  }],
+                }),
               },
-              body: JSON.stringify({
-                contents: [{
-                  role: "user",
-                  parts: [{ text: prompt }],
-                }],
-              }),
-            },
-          );
+            );
 
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
+            data = await response.json().catch(() => ({}));
+
+            if (response.ok) break;
+
+            const retryable = response.status === 429 || response.status === 500 || response.status === 502 || response.status === 503 || response.status === 504;
+            if (!retryable || attempt === MAX_RETRIES) break;
+
+            await sleep(1000 * 2 ** attempt);
+          }
+
+          if (!response || !response.ok) {
             return Response.json(
               {
                 error:
                   typeof data?.error?.message === "string"
                     ? data.error.message
-                    : `Gemini request failed with ${response.status}.`,
+                    : `Gemini request failed with ${response?.status ?? 502}. Please try again shortly.`,
               },
               { status: 502 },
             );
