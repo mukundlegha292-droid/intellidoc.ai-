@@ -1,1 +1,0 @@
-// Gemini backend backup route. Main /api/chat is being switched to Gemini.
