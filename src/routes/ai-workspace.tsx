@@ -97,10 +97,18 @@ async function importUrl(url: string, status: (text: string) => void): Promise<E
   const parsed = new URL(url);
   if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are supported.");
   status("Fetching URL…");
-  const response = await fetch("/api/import-url", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: parsed.toString() }) });
+  const response = await fetch("/api/import-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url: parsed.toString() }),
+  });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.error || `URL returned ${response.status}.`);
-  return { text: typeof data?.text === "string" ? data.text : "", meta: typeof data?.title === "string" && data.title.trim() ? data.title.trim() : parsed.hostname, note: typeof data?.note === "string" ? data.note : "URL imported" };
+  return {
+    text: typeof data?.text === "string" ? data.text : "",
+    meta: typeof data?.title === "string" && data.title.trim() ? data.title.trim() : parsed.hostname,
+    note: typeof data?.note === "string" ? data.note : "URL imported",
+  };
 }
 
 export const Route = createFileRoute("/ai-workspace")({ head: () => ({ meta: [{ title }, { name: "description", content: description }] }), component: AIWorkspacePage });
@@ -131,11 +139,19 @@ function AIWorkspacePage() {
   };
 
   const handleUrl = async () => {
-    const value = url.trim(); if (!value) return; setProcessing(true); setError(""); setStatus("Fetching URL…");
-    try { const result = await importUrl(value, setStatus); processResult(result, result.meta || new URL(value).hostname); setShowUrl(false); }
-    catch (e) { console.error(e); setStatus("URL import failed"); setError(e instanceof Error ? e.message : "This URL could not be imported."); }
-    finally { setProcessing(false); }
-  };
+  const value = url.trim();
+  if (!value) return;
+  setProcessing(true); setError(""); setStatus("Fetching URL…");
+  try {
+    const result = await importUrl(value, setStatus);
+    processResult(result, result.meta || new URL(value).hostname);
+    setShowUrl(false);
+  } catch (e) {
+    console.error(e);
+    setStatus("URL import failed");
+    setError(e instanceof Error ? e.message : "This URL could not be imported.");
+  } finally { setProcessing(false); }
+};
 
   const ask = async (text = question) => {
     const q = text.trim(); if (!q || processing) return;
