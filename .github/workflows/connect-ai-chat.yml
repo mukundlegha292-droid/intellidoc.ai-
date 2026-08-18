@@ -1,0 +1,88 @@
+name: Connect real AI chat
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/connect-ai-chat.yml'
+      - 'src/routes/ai-workspace.tsx'
+      - 'src/routes/api/chat.ts'
+      - '.github/workflows/trigger-ai-chat.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[skip ai chat]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch chat client
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('src/routes/ai-workspace.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          old = re.search(r'  const ask = \(text = question\) => \{[\s\S]*?\n  \};\n\n  return <main', text)
+          if not old:
+              raise SystemExit('ask block not found')
+
+          new = '''  const ask = async (text = question) => {
+    const q = text.trim();
+    if (!q || processing) return;
+    if (!source) {
+      setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]);
+      setQuestion("");
+      return;
+    }
+
+    setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Thinking from your source…" }]);
+    setQuestion("");
+    setProcessing(true);
+    setError("");
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question: q, source, sourceName: name, mode }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `AI request failed with ${response.status}.`);
+      const answer = typeof data?.answer === "string" ? data.answer : "The AI returned no answer.";
+      setMessages((m) => {
+        const next = [...m];
+        const index = next.length - 1;
+        if (next[index]?.role === "assistant") next[index] = { role: "assistant", text: answer };
+        else next.push({ role: "assistant", text: answer });
+        return next;
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unable to generate an AI response.";
+      setMessages((m) => {
+        const next = [...m];
+        const index = next.length - 1;
+        const fallback = { role: "assistant" as const, text: message };
+        if (next[index]?.role === "assistant") next[index] = fallback;
+        else next.push(fallback);
+        return next;
+      });
+      setError(message);
+    } finally { setProcessing(false); }
+  };
+
+  return <main'''
+          text = text[:old.start()] + new + text[old.end():]
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/ai-workspace.tsx
+          git diff --cached --quiet || git commit -m 'connect workspace chat to AI API [skip ai chat]'
+          git push
