@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 
 const MAX_BYTES = 2_500_000;
 const TIMEOUT_MS = 12_000;
-const YT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36";
+const YT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36";
 
 type SourceResult = {
   text: string;
@@ -15,16 +16,27 @@ type SourceResult = {
 function isBlockedHostname(hostname: string) {
   const host = hostname.toLowerCase();
   return (
-    host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" ||
-    host.endsWith(".local") || host.endsWith(".internal") || host.startsWith("10.") || host.startsWith("192.168.") ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
   );
 }
 
 function validateUrl(rawUrl: string) {
   const parsed = new URL(rawUrl);
-  if (!(parsed.protocol === "http:" || parsed.protocol === "https:")) throw new Error("Only HTTP and HTTPS URLs are supported.");
-  if (isBlockedHostname(parsed.hostname)) throw new Error("This URL cannot be imported.");
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only HTTP and HTTPS URLs are supported.");
+  }
+  if (isBlockedHostname(parsed.hostname)) {
+    throw new Error("This URL cannot be imported.");
+  }
   return parsed;
 }
 
@@ -41,6 +53,7 @@ function getYouTubeVideoId(rawUrl: string) {
     if (parsed.pathname === "/watch") return parsed.searchParams.get("v") || "";
     if (parsed.pathname.startsWith("/shorts/")) return parsed.pathname.split("/")[2] || "";
     if (parsed.pathname.startsWith("/embed/")) return parsed.pathname.split("/")[2] || "";
+    if (parsed.pathname.startsWith("/live/")) return parsed.pathname.split("/")[2] || "";
   }
   return "";
 }
@@ -63,18 +76,6 @@ function cleanText(value: string) {
     .trim();
 }
 
-function getMetaContent(html: string, selector: string) {
-  return html.match(selector)?.[1]?.replace(/\s+/g, " ").trim() || "";
-}
-
-function getTitle(html: string, hostname: string) {
-  const ogTitle =
-    getMetaContent(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
-    getMetaContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || "";
-  return ogTitle || title || hostname.replace(/^www\./i, "").split(".")[0];
-}
-
 function cleanHtml(html: string) {
   return decodeEntities(html)
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -87,6 +88,66 @@ function cleanHtml(html: string) {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getMetaContent(html: string, selector: RegExp) {
+  return html.match(selector)?.[1]?.replace(/\s+/g, " ").trim() || "";
+}
+
+function getTitle(html: string, hostname: string) {
+  const ogTitle =
+    getMetaContent(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+    getMetaContent(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  const title =
+    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || "";
+  return ogTitle || title || hostname.replace(/^www\./i, "").split(".")[0];
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function parseCaptionBody(body: string) {
+  try {
+    const json = JSON.parse(body);
+    const lines = (json?.events || [])
+      .flatMap((event: any) =>
+        Array.isArray(event?.segs)
+          ? event.segs.map((seg: any) => cleanText(String(seg?.utf8 || "")))
+          : [],
+      )
+      .filter(Boolean);
+    return lines.join(" ").replace(/\s+/g, " ").trim();
+  } catch {
+    return [...body.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/gi)]
+      .map((match) => cleanText(match[1]))
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+}
+
+async function fetchExternalTranscript(videoId: string) {
+  const endpoint = `https://youtube-transcript.ai/transcript/${encodeURIComponent(videoId)}.txt`;
+  try {
+    const response = await fetchWithTimeout(endpoint, {
+      headers: { accept: "text/plain,text/markdown,*/*", "user-agent": "IntelliDocAI/1.0" },
+    });
+    if (!response.ok) return "";
+    const text = (await response.text()).trim();
+    if (!text) return "";
+    if (/no transcript|not found|unavailable/i.test(text)) return "";
+    return cleanText(text);
+  } catch {
+    return "";
+  }
 }
 
 function extractJsonObject(html: string, marker: string) {
@@ -105,12 +166,19 @@ function extractJsonObject(html: string, marker: string) {
       else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === '"') { inString = true; continue; }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if (ch === "{") depth += 1;
     if (ch === "}") {
       depth -= 1;
       if (depth === 0) {
-        try { return JSON.parse(html.slice(start, i + 1)); } catch { return null; }
+        try {
+          return JSON.parse(html.slice(start, i + 1));
+        } catch {
+          return null;
+        }
       }
     }
   }
@@ -139,31 +207,6 @@ function chooseCaptionTrack(tracks: any[]) {
   })[0] || null;
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function parseCaptionResponse(body: string) {
-  try {
-    const json = JSON.parse(body);
-    const lines = (json?.events || [])
-      .flatMap((event: any) => Array.isArray(event?.segs) ? event.segs.map((seg: any) => cleanText(String(seg?.utf8 || ""))) : [])
-      .filter(Boolean);
-    return lines.join(" ").replace(/\s+/g, " ").trim();
-  } catch {
-    const lines = [...body.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/gi)]
-      .map((match) => cleanText(match[1]))
-      .filter(Boolean);
-    return lines.join(" ").replace(/\s+/g, " ").trim();
-  }
-}
-
 async function fetchCaptionTrack(baseUrl: string) {
   if (!baseUrl) return "";
   const urls = [
@@ -172,35 +215,42 @@ async function fetchCaptionTrack(baseUrl: string) {
   ];
   for (const url of urls) {
     try {
-      const response = await fetchWithTimeout(url, { headers: { "user-agent": YT_USER_AGENT, accept: "application/json,text/plain,application/xml,*/*" } });
+      const response = await fetchWithTimeout(url, {
+        headers: { "user-agent": YT_USER_AGENT, accept: "application/json,text/plain,application/xml,*/*" },
+      });
       if (!response.ok) continue;
-      const text = await response.text();
-      const transcript = await parseCaptionResponse(text);
+      const transcript = await parseCaptionBody(await response.text());
       if (transcript) return transcript;
-    } catch { /* try next */ }
+    } catch {
+      // try next format
+    }
   }
   return "";
 }
 
 async function fetchTimedText(videoId: string) {
-  const candidates = [
+  const urls = [
     `https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&lang=en&fmt=json3`,
     `https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&lang=hi&fmt=json3`,
     `https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&lang=en&kind=asr&fmt=json3`,
     `https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&asr_lang=en&lang=en&kind=asr&fmt=json3`,
   ];
-  for (const url of candidates) {
+  for (const url of urls) {
     try {
-      const response = await fetchWithTimeout(url, { headers: { "user-agent": YT_USER_AGENT, accept: "application/json,application/xml,text/plain,*/*" } });
+      const response = await fetchWithTimeout(url, {
+        headers: { "user-agent": YT_USER_AGENT, accept: "application/json,application/xml,text/plain,*/*" },
+      });
       if (!response.ok) continue;
-      const transcript = await parseCaptionResponse(await response.text());
+      const transcript = await parseCaptionBody(await response.text());
       if (transcript) return transcript;
-    } catch { /* try next */ }
+    } catch {
+      // try next candidate
+    }
   }
   return "";
 }
 
-async function fetchYouTubeTranscript(rawUrl: string): Promise<SourceResult | null> {
+async function fetchNativeYouTubeTranscript(rawUrl: string) {
   const parsed = validateUrl(rawUrl);
   if (!isYouTubeHost(parsed.hostname)) return null;
   const videoId = getYouTubeVideoId(rawUrl);
@@ -209,36 +259,49 @@ async function fetchYouTubeTranscript(rawUrl: string): Promise<SourceResult | nu
   const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
   let html = "";
   try {
-    const response = await fetchWithTimeout(watchUrl, { headers: { "user-agent": YT_USER_AGENT, accept: "text/html,*/*" } });
+    const response = await fetchWithTimeout(watchUrl, {
+      headers: { "user-agent": YT_USER_AGENT, accept: "text/html,*/*" },
+    });
     if (response.ok) html = await response.text();
-  } catch { /* try other YouTube endpoint */ }
+  } catch {
+    // continue with external fallback
+  }
 
-  const candidates: any[] = [];
-  const embeddedPlayer = extractJsonObject(html, "ytInitialPlayerResponse");
-  if (embeddedPlayer) candidates.push(embeddedPlayer);
+  const players: any[] = [];
+  const embedded = extractJsonObject(html, "ytInitialPlayerResponse");
+  if (embedded) players.push(embedded);
 
   const apiKey = extractConfig(html, "INNERTUBE_API_KEY");
   const clientVersion = extractConfig(html, "INNERTUBE_CLIENT_VERSION") || "2.20260818.01.00";
   if (apiKey) {
     try {
-      const response = await fetchWithTimeout(`https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "user-agent": YT_USER_AGENT, accept: "application/json" },
-        body: JSON.stringify({
-          context: { client: { clientName: "WEB", clientVersion } },
-          videoId,
-          contentCheckOk: true,
-          racyCheckOk: true,
-        }),
-      });
+      const response = await fetchWithTimeout(
+        `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": YT_USER_AGENT,
+            accept: "application/json",
+          },
+          body: JSON.stringify({
+            context: { client: { clientName: "WEB", clientVersion } },
+            videoId,
+            contentCheckOk: true,
+            racyCheckOk: true,
+          }),
+        },
+      );
       if (response.ok) {
         const player = await response.json().catch(() => null);
-        if (player) candidates.push(player);
+        if (player) players.push(player);
       }
-    } catch { /* fall through */ }
+    } catch {
+      // use timed text/external fallback
+    }
   }
 
-  for (const player of candidates) {
+  for (const player of players) {
     const tracks = player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
     if (!Array.isArray(tracks) || !tracks.length) continue;
     const track = chooseCaptionTrack(tracks);
@@ -249,8 +312,8 @@ async function fetchYouTubeTranscript(rawUrl: string): Promise<SourceResult | nu
         title: player?.videoDetails?.title || getTitle(html, "youtube.com"),
         sourceUrl: watchUrl,
         contentType: "text/plain",
-        note: "YouTube transcript imported from captions",
-      };
+        note: "YouTube transcript imported from native captions",
+      } as SourceResult;
     }
   }
 
@@ -262,7 +325,18 @@ async function fetchYouTubeTranscript(rawUrl: string): Promise<SourceResult | nu
       sourceUrl: watchUrl,
       contentType: "text/plain",
       note: "YouTube transcript imported from timed text",
-    };
+    } as SourceResult;
+  }
+
+  const external = await fetchExternalTranscript(videoId);
+  if (external) {
+    return {
+      text: external,
+      title: getTitle(html, "youtube.com"),
+      sourceUrl: watchUrl,
+      contentType: "text/plain",
+      note: "YouTube transcript imported from transcript fallback service",
+    } as SourceResult;
   }
 
   return null;
@@ -273,7 +347,10 @@ async function fetchGenericSource(rawUrl: string) {
   for (let redirect = 0; redirect < 4; redirect += 1) {
     const response = await fetchWithTimeout(current.toString(), {
       redirect: "manual",
-      headers: { "user-agent": "IntelliDocAI/1.0 URL Importer", accept: "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.5" },
+      headers: {
+        "user-agent": "IntelliDocAI/1.0 URL Importer",
+        accept: "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.5",
+      },
     });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
@@ -296,32 +373,57 @@ async function fetchGenericSource(rawUrl: string) {
 async function getYouTubeTitle(rawUrl: string) {
   try {
     const target = `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`;
-    const response = await fetchWithTimeout(target, { headers: { "user-agent": "IntelliDocAI/1.0", accept: "application/json" } });
+    const response = await fetchWithTimeout(target, {
+      headers: { "user-agent": "IntelliDocAI/1.0", accept: "application/json" },
+    });
     if (!response.ok) return "";
     const data = await response.json().catch(() => ({}));
     return typeof data?.title === "string" ? data.title.trim() : "";
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 async function resolveSource(rawUrl: string): Promise<SourceResult> {
   const parsed = validateUrl(rawUrl);
+
   if (isYouTubeHost(parsed.hostname)) {
-    const transcript = await fetchYouTubeTranscript(rawUrl);
+    const transcript = await fetchNativeYouTubeTranscript(rawUrl);
     if (transcript) return transcript;
   }
 
   const result = await fetchGenericSource(rawUrl);
-  const { response, bytes, current, contentType, text } = result;
+  const { response, current, contentType, text } = result;
   const title = getTitle(text, parsed.hostname);
 
   if (contentType.includes("text/plain") || contentType.includes("application/json")) {
-    return { text: text.trim(), title, sourceUrl: current.toString(), contentType: contentType || "text/plain", note: "Text content imported server-side" };
+    return {
+      text: text.trim(),
+      title,
+      sourceUrl: current.toString(),
+      contentType: contentType || "text/plain",
+      note: "Text content imported server-side",
+    };
   }
+
   if (contentType.includes("application/pdf") || parsed.pathname.toLowerCase().endsWith(".pdf")) {
-    return { text: "", title, sourceUrl: current.toString(), contentType: "application/pdf", note: "PDF detected and fetched server-side" };
+    return {
+      text: "",
+      title,
+      sourceUrl: current.toString(),
+      contentType: "application/pdf",
+      note: "PDF detected and fetched server-side",
+    };
   }
+
   const cleaned = cleanHtml(text);
-  return { text: cleaned, title: isYouTubeHost(parsed.hostname) ? await getYouTubeTitle(rawUrl) || title : title, sourceUrl: current.toString(), contentType: response.headers.get("content-type") || "text/html", note: cleaned ? "Web page text imported server-side" : "The page returned no readable text." };
+  return {
+    text: cleaned,
+    title: isYouTubeHost(parsed.hostname) ? (await getYouTubeTitle(rawUrl)) || title : title,
+    sourceUrl: current.toString(),
+    contentType: response.headers.get("content-type") || "text/html",
+    note: cleaned ? "Web page text imported server-side" : "The page returned no readable text.",
+  };
 }
 
 export const Route = createFileRoute("/api/import-url")({
@@ -333,14 +435,16 @@ export const Route = createFileRoute("/api/import-url")({
           if (!rawUrl) return new Response("URL is required.", { status: 400 });
           const result = await resolveSource(rawUrl);
           const headers = new Headers({ "cache-control": "no-store", "access-control-allow-origin": "*" });
+          headers.set("content-type", `${result.contentType}; charset=utf-8`);
           headers.set("x-intellidoc-title", result.title);
           headers.set("x-intellidoc-source-url", result.sourceUrl);
-          headers.set("content-type", result.contentType || "text/plain; charset=utf-8");
+          if (result.contentType === "text/plain") return new Response(result.text, { status: 200, headers });
           return new Response(result.text, { status: 200, headers });
         } catch (error) {
           return new Response(error instanceof Error ? error.message : "Unable to import this URL.", { status: 502 });
         }
       },
+
       POST: async ({ request }) => {
         try {
           const body = await request.json().catch(() => ({}));
@@ -349,7 +453,10 @@ export const Route = createFileRoute("/api/import-url")({
           const result = await resolveSource(rawUrl);
           return Response.json(result);
         } catch (error) {
-          return Response.json({ error: error instanceof Error ? error.message : "Unable to import this URL." }, { status: 502 });
+          return Response.json(
+            { error: error instanceof Error ? error.message : "Unable to import this URL." },
+            { status: 502 },
+          );
         }
       },
     },
