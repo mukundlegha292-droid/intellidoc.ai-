@@ -1,0 +1,152 @@
+name: Final YouTube video fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip final youtube fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Patch source files
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          # ---- import-url: make YouTube metadata-only ----
+          p = Path('src/routes/api/import-url.ts')
+          t = p.read_text(encoding='utf-8')
+          if 'YouTube video source ready. Video ID:' not in t:
+              marker = 'async function resolveSource(rawUrl: string): Promise<SourceResult> {'
+              if marker not in t:
+                  raise SystemExit('resolveSource marker not found')
+              fast = '''async function resolveSource(rawUrl: string): Promise<SourceResult> {
+  const parsed = validateUrl(rawUrl);
+
+  if (isYouTubeHost(parsed.hostname)) {
+    const videoId = getYouTubeVideoId(rawUrl);
+    const title = (await getYouTubeTitle(rawUrl)) || `YouTube video ${videoId || "source"}`;
+    return {
+      text: `YouTube video source ready. Video ID: ${videoId}.`,
+      title,
+      sourceUrl: rawUrl,
+      contentType: "video/youtube",
+      note: "YouTube video ready for direct AI analysis",
+    };
+  }
+
+'''
+              t = t.replace(marker, fast, 1)
+              p.write_text(t, encoding='utf-8')
+
+          # ---- chat API: send actual public YouTube URL to Gemini ----
+          p = Path('src/routes/api/chat.ts')
+          t = p.read_text(encoding='utf-8')
+          if 'file_uri: sourceUrl' not in t:
+              t = t.replace(
+                  'const sourceName = clean(body?.sourceName, 240) || "Imported source";',
+                  'const sourceName = clean(body?.sourceName, 240) || "Imported source";\n          const sourceType = clean(body?.sourceType, 40) || "text";\n          const sourceUrl = clean(body?.sourceUrl, 2_000);',
+                  1,
+              )
+              t = t.replace(
+                  'if (!source) return Response.json({ error: "Import a source before asking a question." }, { status: 400 });',
+                  'if (!source && sourceType !== "youtube") return Response.json({ error: "Import a source before asking a question." }, { status: 400 });\n          if (sourceType === "youtube" && !sourceUrl) return Response.json({ error: "The YouTube video URL is missing." }, { status: 400 });',
+                  1,
+              )
+              t = t.replace(
+                  'const prompt = buildGroundedPrompt({ source, sourceName, mode, question });',
+                  '''const prompt = sourceType === "youtube"
+            ? [
+                "You are IntelliDoc AI, a video-grounded research and learning assistant.",
+                `Workspace mode: ${mode}.`,
+                `Video source: ${sourceName}.`,
+                "Analyze the supplied YouTube video itself. Do not answer from a scraped transcript or generic web knowledge.",
+                "Use spoken explanations, visible slides/boards/screens, demonstrations, formulas, reactions, examples and on-screen text.",
+                "If the video does not contain the answer, say: I couldn't find that in the video.",
+                "Do not invent timestamps; only mention one when the model can support it from the video.",
+                `USER QUESTION:\n${question}`,
+              ].join("\\n")
+            : buildGroundedPrompt({ source, sourceName, mode, question });''',
+                  1,
+              )
+              old = '''parts: [{ text: prompt }],'''
+              new = '''parts: sourceType === "youtube"
+                      ? [
+                          { file_data: { file_uri: sourceUrl } },
+                          { text: prompt },
+                        ]
+                      : [{ text: prompt }],'''
+              if old not in t:
+                  raise SystemExit('Gemini parts marker not found')
+              t = t.replace(old, new, 1)
+              t = t.replace(
+                  'return Response.json({ answer, model: MODEL, grounded: true, sourceName });',
+                  'return Response.json({ answer, model: MODEL, grounded: true, sourceName, sourceType });',
+                  1,
+              )
+              p.write_text(t, encoding='utf-8')
+
+          # ---- frontend: carry video source metadata ----
+          p = Path('src/routes/ai-workspace.tsx')
+          t = p.read_text(encoding='utf-8')
+          if 'sourceType?: "text" | "youtube"' not in t:
+              t = t.replace(
+                  'type Extracted = { text: string; meta: string; note: string };',
+                  'type Extracted = { text: string; meta: string; note: string; sourceType?: "text" | "youtube"; sourceUrl?: string };',
+                  1,
+              )
+              t = t.replace(
+                  '  const [source, setSource] = useState("");',
+                  '  const [source, setSource] = useState("");\n  const [sourceType, setSourceType] = useState<"text" | "youtube">("text");\n  const [sourceUrl, setSourceUrl] = useState("");',
+                  1,
+              )
+              t = t.replace(
+                  '    note: typeof data?.note === "string" ? data.note : "URL imported",\n  };',
+                  '    note: typeof data?.note === "string" ? data.note : "URL imported",\n    sourceType: data?.contentType === "video/youtube" ? "youtube" : "text",\n    sourceUrl: typeof data?.sourceUrl === "string" ? data.sourceUrl : parsed.toString(),\n  };',
+                  1,
+              )
+              t = t.replace(
+                  'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);',
+                  'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceType(result.sourceType === "youtube" ? "youtube" : "text"); setSourceUrl(result.sourceUrl || ""); setStatus(result.sourceType === "youtube" ? "Video ready" : (result.text ? "Source ready" : result.note));',
+                  1,
+              )
+              t = t.replace(
+                  'if (!source) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+                  'if (!source && sourceType !== "youtube") { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+                  1,
+              )
+              t = t.replace(
+                  'body: JSON.stringify({ question: q, source, sourceName: name, mode })',
+                  'body: JSON.stringify({ question: q, source, sourceName: name, mode, sourceType, sourceUrl })',
+                  1,
+              )
+              old_view = '{source ? <pre className="whitespace-pre-wrap font-sans">{source}</pre> : <p>Import a file or URL to replace this area with real source content.</p>}'
+              new_view = '''{sourceType === "youtube" && sourceUrl ? <div className="space-y-4"><div className="aspect-video overflow-hidden rounded-2xl border border-hairline bg-black/20"><iframe title={name} src={sourceUrl.replace("watch?v=", "embed/").split("&")[0]} className="h-full w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div><p className="text-sm font-semibold text-foreground">Video source ready</p><p className="text-[11px] text-muted-foreground">Ask anything about the video. Gemini analyzes the video itself.</p></div> : source ? <pre className="whitespace-pre-wrap font-sans">{source}</pre> : <p>Import a file or URL to replace this area with real source content.</p>}'''
+              if old_view not in t:
+                  raise SystemExit('source view marker not found')
+              t = t.replace(old_view, new_view, 1)
+              p.write_text(t, encoding='utf-8')
+
+      - name: Install and build before commit
+        run: npm ci && npm run build
+
+      - name: Commit validated patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/api/import-url.ts src/routes/api/chat.ts src/routes/ai-workspace.tsx .github/workflows/final-youtube-video-fix.yml
+          git commit -m 'feat: make YouTube a direct video source for AI [skip final youtube fix]'
+          git push
