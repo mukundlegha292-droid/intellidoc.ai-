@@ -1,0 +1,51 @@
+name: Optimize Gemini quota
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  optimize:
+    if: contains(github.event.head_commit.message, 'quota optimization trigger')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - name: Patch workspace and chat
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/ai-workspace.tsx')
+          s = p.read_text()
+          # Cache suggestion responses for the current browser session and avoid duplicate YouTube calls.
+          if 'suggestionCacheKey' not in s and 'generateSuggestedQuestions' in s:
+              s = s.replace('  const generateSuggestedQuestions = async (sourceText: string, urlValue: string, displayName: string) => {', '  const suggestionCacheKey = (sourceText: string, urlValue: string) => `intellidoc:suggestions:${urlValue || sourceText.slice(0, 120)}`;\n\n  const generateSuggestedQuestions = async (sourceText: string, urlValue: string, displayName: string) => {', 1)
+              s = s.replace('    if (!sourceText && !urlValue) { setSuggestedQuestions([]); return; }\n    try {', '    if (!sourceText && !urlValue) { setSuggestedQuestions([]); return; }\n    const cacheKey = suggestionCacheKey(sourceText, urlValue);\n    try {\n      const cached = sessionStorage.getItem(cacheKey);\n      if (cached) { const parsed = JSON.parse(cached); if (Array.isArray(parsed)) { setSuggestedQuestions(parsed.slice(0, 5)); return; } }\n    } catch {}\n    try {', 1)
+              s = s.replace('      if (response.ok && Array.isArray(data?.suggestions)) setSuggestedQuestions(data.suggestions.filter((item: unknown): item is string => typeof item === "string").slice(0, 5));', '      if (response.ok && Array.isArray(data?.suggestions)) { const next = data.suggestions.filter((item: unknown): item is string => typeof item === "string").slice(0, 5); setSuggestedQuestions(next); try { sessionStorage.setItem(cacheKey, JSON.stringify(next)); } catch {} }', 1)
+          # processResult already generates suggestions; remove duplicate URL-side generation.
+          s = s.replace('    setSourceUrl(value);\n    void generateSuggestedQuestions(result.text, value, displayName);\n    setShowUrl(false);', '    setSourceUrl(value);\n    setShowUrl(false);', 1)
+          # Keep chat request from retrying after a quota error by surfacing the 429 cleanly.
+          p.write_text(s)
+          cp = Path('src/routes/api/chat.ts')
+          c = cp.read_text()
+          c = c.replace('const MAX_RETRIES = 2;', 'const MAX_RETRIES = 1;', 1)
+          old = '            const retryable = [429, 500, 502, 503, 504].includes(response.status);\n            if (!retryable || attempt === MAX_RETRIES) break;'
+          new = '            if (response.status === 429) return Response.json({ error: typeof data?.error?.message === "string" ? data.error.message : "Gemini quota/rate limit reached." }, { status: 429 });\n            const retryable = [500, 502, 503, 504].includes(response.status);\n            if (!retryable || attempt === MAX_RETRIES) break;'
+          c = c.replace(old, new, 1)
+          cp.write_text(c)
+          PY
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/ai-workspace.tsx src/routes/api/chat.ts .github/workflows/optimize-gemini-quota.yml
+          git commit -m "fix: optimize Gemini request quota usage" || exit 0
+          rm .github/workflows/optimize-gemini-quota.yml
+          git add .github/workflows/optimize-gemini-quota.yml
+          git commit --amend --no-edit
+          git push
