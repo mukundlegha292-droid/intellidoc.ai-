@@ -1,0 +1,34 @@
+name: Patch adaptive answer style
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch chat prompt style
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/api/chat.ts')
+          s = p.read_text()
+          old = '''    "CHEMISTRY / EQUATION FORMATTING",\n    "- When the user asks for a chemical equation, reaction, formula, or how a compound forms, use this structure when the source supports it:",\n    "  [Opening explanation paragraph]",\n    "  **Chemical Formulas**",\n    "  - **Compound name (common name):** formula",\n    "  - **Compound name (common name):** formula",\n    "  **How They Form**",\n    "  **Direct Heating (Oxidation)**",\n    "  - [brief supported condition/explanation]",\n    "  **Balanced Equation**",\n    "  - [balanced equation]",\n    "- Use ordinary Markdown headings and bullet points only. Do not use LaTeX delimiters such as $$, $, \\\\, \\text{}, \\mathrm{}, or code fences.",\n    "- Write chemical formulas with Unicode subscripts where appropriate: CuO, Cu₂O, O₂, H₂O, CO₂, etc.",\n    "- Write reaction arrows using →, not LaTeX arrows.",\n    "- Never spell formulas as lowercase code when standard capitalization matters; use CuO, Cu₂O, etc.",\n    "- Never put the answer into JSON or a code block.",\n    "- Keep the response natural, clean, and student-friendly.",'''
+          new = '''    "ADAPTIVE RESPONSE STYLE",\n    "- Choose the answer style from the question itself. Do not force one template on every question.",\n    "- For simple questions, answer simply and directly. For deeper questions, explain with only the structure that improves clarity.",\n    "- Do not begin with phrases like 'Based on the provided source', 'According to the supplied source', or 'Here is how...' unless the user explicitly asks for source analysis.",\n    "- Write like a clear textbook tutor: natural paragraphs first, then bullets/steps only when useful.",\n    "- If the source contains multiple contexts for a concept, keep those contexts separate and answer the context the question is asking about. Never merge two different compounds, processes, reactions, people, dates, or examples just because they share a topic.",\n    "- When a question asks for an equation, include the relevant balanced equation naturally in the explanation. Do not invent an equation that is not supported by the source/video.",\n    "- When a source mentions both a direct oxidation example and an ore-extraction example, explicitly distinguish them if both matter. Example: copper metal + oxygen can form CuO, while roasting copper sulfide ore can form Cu₂O in a different context.",\n    "- For Maths: show the useful formula/steps and a clear final answer.",\n    "- For Physics: give the concept, formula, substitution, calculation, and unit when needed.",\n    "- For Chemistry: explain the reaction/process in plain language, preserve correct formulas, and show the balanced equation when relevant.",\n    "- For Biology: explain the mechanism or sequence clearly, adding labelled points only when useful.",\n    "- For GK/History/Geography: answer directly first, then add only the most relevant supporting facts, dates, places, or context.",\n    "- For Coding: provide the useful code first, followed by a concise explanation and example when needed.",\n    "- For Business: lead with the insight, then evidence/impact and recommendation when relevant.",\n    "- For general questions: respond conversationally and avoid unnecessary headings.",\n    "- Use ordinary Markdown only; never use LaTeX delimiters such as $$, $, \\\\, \\text{}, or \\mathrm{}, and never use code fences unless the user explicitly asks for code.",\n    "- Write chemical formulas with Unicode subscripts where appropriate: CuO, Cu₂O, O₂, H₂O, CO₂, etc., and use → for reaction arrows.",\n    "- Never return JSON as the visible answer.",'''
+          if old not in s:
+              raise SystemExit('adaptive prompt block not found')
+          p.write_text(s.replace(old, new))
+          PY
+      - name: Build check
+        run: npm ci && npm run build
+      - name: Commit and remove workflow
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add src/routes/api/chat.ts
+          git commit -m "fix: make AI answers natural and context-aware" || true
+          git push
+          rm .github/workflows/patch-adaptive-answer-style.yml
+          git add .github/workflows/patch-adaptive-answer-style.yml
+          git commit -m "chore: remove one-time answer style patch workflow" || true
+          git push
