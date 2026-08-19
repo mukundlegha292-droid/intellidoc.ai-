@@ -1,0 +1,57 @@
+name: Final dynamic suggestions patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'dynamic suggestions trigger')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch workspace and studio
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/ai-workspace.tsx')
+          s = p.read_text()
+          if 'const [sourceUrl' not in s:
+              s = s.replace('  const [source, setSource] = useState("");\n', '  const [source, setSource] = useState("");\n  const [sourceUrl, setSourceUrl] = useState("");\n', 1)
+          s = s.replace('setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);', 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceUrl(""); setStatus(result.text ? "Source ready" : result.note);', 1)
+          s = s.replace('processResult(result, result.meta || new URL(value).hostname);\n    setShowUrl(false);', 'processResult(result, result.meta || new URL(value).hostname);\n    setSourceUrl(value);\n    setShowUrl(false);', 1)
+          s = s.replace('if (!source) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }', 'if (!source && !sourceUrl) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }', 1)
+          s = s.replace('JSON.stringify({ question: q, source, sourceName: name, mode })', 'JSON.stringify({ question: q, source, sourceUrl, sourceName: name, mode })', 1)
+          s = s.replace('<StudioPanel source={source} processing={processing} onAsk={ask} />', '<StudioPanel source={source} sourceUrl={sourceUrl} processing={processing} onAsk={ask} />', 1)
+          p.write_text(s)
+
+          p = Path('src/components/StudioPanel.tsx')
+          s = p.read_text()
+          s = s.replace('import { BarChart3, BookOpenText, FileText, Headphones, Image, Layers3, Lightbulb, Map, PlaySquare, Presentation, Sparkles } from "lucide-react";', 'import { useEffect, useState } from "react";\nimport { BarChart3, BookOpenText, FileText, Headphones, Image, Layers3, Lightbulb, Loader2, Map, PlaySquare, Presentation, Sparkles } from "lucide-react";', 1)
+          s = s.replace('  source: string;\n  processing: boolean;', '  source: string;\n  sourceUrl?: string;\n  processing: boolean;', 1)
+          s = s.replace('export default function StudioPanel({ source, processing, onAsk }: StudioPanelProps) {', 'export default function StudioPanel({ source, sourceUrl = "", processing, onAsk }: StudioPanelProps) {\n  const [smartQuestions, setSmartQuestions] = useState<string[]>([]);\n  const [loadingQuestions, setLoadingQuestions] = useState(false);\n\n  useEffect(() => {\n    let cancelled = false;\n    const load = async () => {\n      if (!source && !sourceUrl) { setSmartQuestions([]); return; }\n      setLoadingQuestions(true);\n      try {\n        const key = `intellidoc:suggestions:${sourceUrl || source.slice(0, 1000)}`;\n        const cached = sessionStorage.getItem(key);\n        if (cached) { const parsed = JSON.parse(cached); if (Array.isArray(parsed) && !cancelled) { setSmartQuestions(parsed.slice(0, 5)); setLoadingQuestions(false); return; } }\n        const res = await fetch("/api/suggestions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source, sourceUrl, sourceName: "Current source", mode: "student" }) });\n        const data = await res.json().catch(() => ({}));\n        const next = Array.isArray(data?.suggestions) ? data.suggestions.filter((x: unknown): x is string => typeof x === "string").slice(0, 5) : [];\n        if (!cancelled) { setSmartQuestions(next); if (next.length) sessionStorage.setItem(key, JSON.stringify(next)); }\n      } catch { if (!cancelled) setSmartQuestions([]); }\n      finally { if (!cancelled) setLoadingQuestions(false); }\n    };\n    void load();\n    return () => { cancelled = true; };\n  }, [source, sourceUrl]);', 1)
+          old = '''            {["What are the most important concepts?", "Explain the difficult parts in simple language.", "What should I remember for an exam or meeting?", "Create a practical example based on this source."].map((q) => (\n              <button key={q} disabled={processing} onClick={() => onAsk(q)} className="group rounded-2xl border border-hairline bg-background/25 p-3.5 text-left transition hover:border-primary/25 hover:bg-primary/5 disabled:opacity-50">\n                <div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-xl bg-primary/8 text-primary-glow"><Sparkles className="size-3.5" /></span><span className="text-xs leading-5 text-muted-foreground group-hover:text-foreground">{q}</span></div>\n              </button>\n            ))}'''
+          new = '''            {loadingQuestions ? (\n              <div className="flex items-center gap-2 rounded-2xl border border-hairline bg-background/25 p-3.5 text-xs text-muted-foreground"><Loader2 className="size-4 animate-spin text-primary-glow" /> Generating questions from this source…</div>\n            ) : (smartQuestions.length ? smartQuestions : ["What are the most important concepts from this source?", "Explain the key idea in simple language.", "What should I remember from this source?"]).map((q) => (\n              <button key={q} disabled={processing} onClick={() => onAsk(q)} className="group rounded-2xl border border-hairline bg-background/25 p-3.5 text-left transition hover:border-primary/25 hover:bg-primary/5 disabled:opacity-50">\n                <div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-xl bg-primary/8 text-primary-glow"><Sparkles className="size-3.5" /></span><span className="text-xs leading-5 text-muted-foreground group-hover:text-foreground">{q}</span></div>\n              </button>\n            ))}'''
+          if old in s: s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/ai-workspace.tsx src/components/StudioPanel.tsx .github/workflows/dynamic-suggestions-finalize.yml
+          git commit -m "feat: fix dynamic suggested questions" || exit 0
+          rm .github/workflows/dynamic-suggestions-finalize.yml
+          git add .github/workflows/dynamic-suggestions-finalize.yml
+          git commit --amend --no-edit
+          git push
