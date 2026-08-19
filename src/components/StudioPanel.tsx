@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { BarChart3, BookOpenText, FileText, Headphones, Image, Layers3, Lightbulb, Map, PlaySquare, Presentation, Sparkles } from "lucide-react";
 
 type StudioPanelProps = {
@@ -25,7 +26,50 @@ function cleanPreview(text: string) {
   return value.length > 760 ? `${value.slice(0, 760)}…` : value;
 }
 
+const fallbackQuestions = [
+  "What are the most important concepts?",
+  "Explain the difficult parts in simple language.",
+  "What should I remember for an exam or meeting?",
+  "Create a practical example based on this source.",
+];
+
 export default function StudioPanel({ source, processing, onAsk }: StudioPanelProps) {
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!source.trim()) {
+      setQuestions([]);
+      return () => { cancelled = true; };
+    }
+
+    const loadQuestions = async () => {
+      setLoadingQuestions(true);
+      try {
+        const response = await fetch("/api/suggestions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source, sourceName: "Current source", mode: "student" }),
+        });
+        const data = await response.json().catch(() => ({}));
+        const next = Array.isArray(data?.suggestions)
+          ? data.suggestions.filter((item: unknown): item is string => typeof item === "string" && item.trim()).slice(0, 5)
+          : [];
+        if (!cancelled) setQuestions(next.length ? next : fallbackQuestions);
+      } catch {
+        if (!cancelled) setQuestions(fallbackQuestions);
+      } finally {
+        if (!cancelled) setLoadingQuestions(false);
+      }
+    };
+
+    void loadQuestions();
+    return () => { cancelled = true; };
+  }, [source]);
+
+  const visibleQuestions = questions.length ? questions : (!source.trim() ? fallbackQuestions : []);
+
   return (
     <section className="mt-5 overflow-hidden rounded-[2rem] border border-hairline bg-surface/70">
       <div className="border-b border-hairline bg-background/20 p-5 sm:p-6">
@@ -58,11 +102,11 @@ export default function StudioPanel({ source, processing, onAsk }: StudioPanelPr
               <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground/80">Suggested questions</p>
               <h3 className="mt-1 text-base font-semibold">Go deeper with one click</h3>
             </div>
-            <span className="text-[10px] text-muted-foreground">AI-generated from source</span>
+            <span className="text-[10px] text-muted-foreground">{loadingQuestions ? "Generating…" : "AI-generated from source"}</span>
           </div>
           <div className="mt-3 grid gap-2.5">
-            {["What are the most important concepts?", "Explain the difficult parts in simple language.", "What should I remember for an exam or meeting?", "Create a practical example based on this source."].map((q) => (
-              <button key={q} disabled={processing} onClick={() => onAsk(q)} className="group rounded-2xl border border-hairline bg-background/25 p-3.5 text-left transition hover:border-primary/25 hover:bg-primary/5 disabled:opacity-50">
+            {visibleQuestions.map((q) => (
+              <button key={q} disabled={processing || loadingQuestions} onClick={() => onAsk(q)} className="group rounded-2xl border border-hairline bg-background/25 p-3.5 text-left transition hover:border-primary/25 hover:bg-primary/5 disabled:opacity-50">
                 <div className="flex items-center gap-3"><span className="flex size-8 items-center justify-center rounded-xl bg-primary/8 text-primary-glow"><Sparkles className="size-3.5" /></span><span className="text-xs leading-5 text-muted-foreground group-hover:text-foreground">{q}</span></div>
               </button>
             ))}
