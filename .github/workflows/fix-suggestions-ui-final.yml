@@ -1,0 +1,63 @@
+name: Fix suggested questions UI final
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'suggestions final trigger')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch StudioPanel and workspace
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/components/StudioPanel.tsx')
+          s = p.read_text()
+          s = s.replace('  processing: boolean;\n  onAsk: (prompt: string) => void;\n};', '  processing: boolean;\n  onAsk: (prompt: string) => void;\n  sourceUrl?: string;\n  sourceName?: string;\n  mode?: string;\n};')
+          s = s.replace('export default function StudioPanel({ source, processing, onAsk }: StudioPanelProps) {', 'export default function StudioPanel({ source, processing, onAsk, sourceUrl = "", sourceName = "Current source", mode = "student" }: StudioPanelProps) {')
+          s = s.replace('    if (!source.trim()) {\n      setQuestions([]);\n      return () => { cancelled = true; };\n    }', '    if (!source.trim() && !sourceUrl.trim()) {\n      setQuestions(fallbackQuestions);\n      setLoadingQuestions(false);\n      return () => { cancelled = true; };\n    }')
+          s = s.replace('          body: JSON.stringify({ source, sourceName: "Current source", mode: "student" }),', '          body: JSON.stringify({ source, sourceUrl, sourceName, mode }),')
+          s = s.replace('      } catch {\n        if (!cancelled) setQuestions(fallbackQuestions);\n      } finally {', '      } catch {\n        if (!cancelled) setQuestions(fallbackQuestions);\n      } finally {')
+          s = s.replace('  }, [source]);', '  }, [source, sourceUrl, sourceName, mode]);')
+          s = s.replace('  const visibleQuestions = questions.length ? questions : (!source.trim() ? fallbackQuestions : []);', '  const visibleQuestions = questions.length ? questions : fallbackQuestions;')
+          p.write_text(s)
+
+          w = Path('src/routes/ai-workspace.tsx')
+          ws = w.read_text()
+          if 'const [sourceUrl, setSourceUrl]' not in ws:
+              ws = ws.replace('  const [source, setSource] = useState("");\n', '  const [source, setSource] = useState("");\n  const [sourceUrl, setSourceUrl] = useState("");\n')
+          old_proc = 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);'
+          if old_proc in ws:
+              ws = ws.replace(old_proc, 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceUrl(""); setStatus(result.text ? "Source ready" : result.note);', 1)
+          old_url = '    processResult(result, result.meta || new URL(value).hostname);\n    setShowUrl(false);'
+          if old_url in ws:
+              ws = ws.replace(old_url, '    processResult(result, result.meta || new URL(value).hostname);\n    setSourceUrl(value);\n    setShowUrl(false);', 1)
+          ws = ws.replace('<StudioPanel source={source} processing={processing} onAsk={ask} />', '<StudioPanel source={source} sourceUrl={sourceUrl} sourceName={name} mode={mode} processing={processing} onAsk={ask} />')
+          ws = ws.replace('if (!source) { setMessages', 'if (!source && !sourceUrl) { setMessages', 1)
+          ws = ws.replace('JSON.stringify({ question: q, source, sourceName: name, mode })', 'JSON.stringify({ question: q, source, sourceUrl, sourceName: name, mode })')
+          w.write_text(ws)
+          PY
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/StudioPanel.tsx src/routes/ai-workspace.tsx .github/workflows/fix-suggestions-ui-final.yml
+          git commit -m "fix: show suggested questions for text and YouTube sources"
+          rm .github/workflows/fix-suggestions-ui-final.yml
+          git add .github/workflows/fix-suggestions-ui-final.yml
+          git commit --amend --no-edit
+          git push
