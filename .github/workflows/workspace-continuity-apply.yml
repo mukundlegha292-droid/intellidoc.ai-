@@ -1,0 +1,77 @@
+name: Workspace continuity apply
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'workspace continuity apply')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch workspace continuity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/ai-workspace.tsx')
+          s = p.read_text()
+
+          if 'const STORAGE_KEY = "intellidoc-workspace-v1";' not in s:
+              s = s.replace('const XLSX_URL = "https://esm.sh/xlsx@0.18.5?bundle";\n', 'const XLSX_URL = "https://esm.sh/xlsx@0.18.5?bundle";\nconst STORAGE_KEY = "intellidoc-workspace-v1";\n', 1)
+
+          if '  const [sourceUrl, setSourceUrl]' not in s:
+              s = s.replace('  const [source, setSource] = useState("");\n', '  const [source, setSource] = useState("");\n  const [sourceUrl, setSourceUrl] = useState("");\n', 1)
+
+          if 'const [hydrated, setHydrated]' not in s:
+              s = s.replace('  const [messages, setMessages] = useState<ChatMessage[]>([{ role: "assistant", text: "Choose a file or import a URL. I’ll bring the source into this workspace." }]);\n', '  const [messages, setMessages] = useState<ChatMessage[]>([{ role: "assistant", text: "Choose a file or import a URL. I’ll bring the source into this workspace." }]);\n  const [hydrated, setHydrated] = useState(false);\n', 1)
+
+          if 'useEffect(() => {' not in s.split('function AIWorkspacePage()')[1].split('return <main')[0]:
+              marker = '  const processResult = (result: Extracted, displayName: string) => {\n'
+              helper = '''  useEffect(() => {\n    try {\n      const raw = localStorage.getItem(STORAGE_KEY);\n      if (raw) {\n        const saved = JSON.parse(raw);\n        if (typeof saved?.source === "string") setSource(saved.source);\n        if (typeof saved?.sourceUrl === "string") setSourceUrl(saved.sourceUrl);\n        if (typeof saved?.name === "string") setName(saved.name);\n        if (typeof saved?.meta === "string") setMeta(saved.meta);\n        if (typeof saved?.mode === "string") setMode(saved.mode as WorkspaceMode);\n        if (Array.isArray(saved?.messages)) setMessages(saved.messages);\n      }\n    } catch (error) { console.warn("Unable to restore workspace", error); }\n    setHydrated(true);\n  }, []);\n\n  useEffect(() => {\n    if (!hydrated) return;\n    try {\n      localStorage.setItem(STORAGE_KEY, JSON.stringify({ source, sourceUrl, name, meta, mode, messages }));\n    } catch (error) { console.warn("Unable to persist workspace", error); }\n  }, [hydrated, source, sourceUrl, name, meta, mode, messages]);\n\n'''
+              s = s.replace(marker, helper + marker, 1)
+
+          old_proc = 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);'
+          if old_proc in s and 'setSourceUrl("")' not in s[s.find(old_proc):s.find(old_proc)+250]:
+              s = s.replace(old_proc, 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceUrl(""); setStatus(result.text ? "Source ready" : result.note);', 1)
+
+          old_url = '    processResult(result, result.meta || new URL(value).hostname);\n    setShowUrl(false);'
+          if old_url in s:
+              s = s.replace(old_url, '    const displayName = result.meta || new URL(value).hostname;\n    processResult(result, displayName);\n    setSourceUrl(value);\n    setShowUrl(false);', 1)
+
+          s = s.replace('if (!source) { setMessages', 'if (!source && !sourceUrl) { setMessages', 1)
+          s = s.replace('JSON.stringify({ question: q, source, sourceName: name, mode })', 'JSON.stringify({ question: q, source, sourceUrl, sourceName: name, mode })', 1)
+
+          s = s.replace('<StudioPanel source={source} processing={processing} onAsk={ask} />', '<StudioPanel source={source} sourceUrl={sourceUrl} sourceName={name} mode={mode} processing={processing} onAsk={ask} />', 1)
+          p.write_text(s)
+
+          sp = Path('src/components/StudioPanel.tsx')
+          ss = sp.read_text()
+          ss = ss.replace('  processing: boolean;\n  onAsk: (prompt: string) => void;\n};', '  processing: boolean;\n  onAsk: (prompt: string) => void;\n  sourceUrl?: string;\n  sourceName?: string;\n  mode?: string;\n};')
+          ss = ss.replace('export default function StudioPanel({ source, processing, onAsk }: StudioPanelProps) {', 'export default function StudioPanel({ source, processing, onAsk, sourceUrl = "", sourceName = "Current source", mode = "student" }: StudioPanelProps) {')
+          ss = ss.replace('    if (!source.trim()) {\n      setQuestions([]);\n      return () => { cancelled = true; };\n    }', '    if (!source.trim() && !sourceUrl.trim()) {\n      setQuestions(fallbackQuestions);\n      setLoadingQuestions(false);\n      return () => { cancelled = true; };\n    }')
+          ss = ss.replace('body: JSON.stringify({ source, sourceName: "Current source", mode: "student" }),', 'body: JSON.stringify({ source, sourceUrl, sourceName, mode }),')
+          ss = ss.replace('  }, [source]);', '  }, [source, sourceUrl, sourceName, mode]);')
+          ss = ss.replace('  const visibleQuestions = questions.length ? questions : (!source.trim() ? fallbackQuestions : []);', '  const visibleQuestions = questions.length ? questions : fallbackQuestions;')
+          sp.write_text(ss)
+          PY
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/ai-workspace.tsx src/components/StudioPanel.tsx .github/workflows/workspace-continuity-apply.yml
+          git commit -m "feat: persist workspace and wire YouTube suggestions" || exit 0
+          rm .github/workflows/workspace-continuity-apply.yml
+          git add .github/workflows/workspace-continuity-apply.yml
+          git commit --amend --no-edit
+          git push
