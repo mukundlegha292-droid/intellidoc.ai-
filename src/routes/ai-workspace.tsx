@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
+import StudioPanel from "../components/StudioPanel";
 import { ArrowLeft, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, FileBarChart, FileText, GraduationCap, Loader2, MessageSquare, Presentation, Search, Send, Sparkles, UploadCloud, Link2, X } from "lucide-react";
 
 const title = "IntelliDoc AI — AI Document Workspace";
@@ -177,6 +178,7 @@ function AIWorkspacePage() {
     <div className="relative mx-auto min-h-screen max-w-[1600px] p-4 sm:p-5 lg:p-6">
       <header className="glass-panel sticky top-4 z-30 flex flex-wrap items-center gap-3 rounded-3xl px-4 py-3 sm:px-5"><a href="/" className="flex size-10 items-center justify-center rounded-2xl border border-hairline bg-surface text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" /></a><div className="min-w-0 flex-1"><p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70">AI Workspace</p><h1 className="truncate font-display text-base font-semibold">{name}</h1></div><span className="hidden items-center gap-2 rounded-full border border-chart-3/20 bg-chart-3/8 px-3 py-1.5 text-[10px] text-chart-3 sm:inline-flex">{processing ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />} {status}</span><button className="inline-flex h-10 items-center gap-2 rounded-2xl bg-primary px-3.5 text-xs font-semibold text-primary-foreground" onClick={() => setTab("actions")}><FileBarChart className="size-3.5" /> Generate Report</button></header>
       <section className="mt-5 rounded-[2rem] border border-hairline bg-surface/65 p-4 sm:p-5"><p className="text-[10px] uppercase tracking-[0.2em] text-primary-glow">Choose your workspace</p><h2 className="mt-1 font-display text-xl font-semibold sm:text-2xl">One source. Three intelligent workflows.</h2><div className="mt-4 grid gap-2.5 md:grid-cols-3">{modes.map(({ id, label, description: d, icon: Icon }) => <button key={id} onClick={() => setMode(id)} className={`rounded-2xl border p-4 text-left ${mode === id ? "border-primary/35 bg-primary/8" : "border-hairline bg-background/20 hover:border-primary/20"}`}><span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary-glow"><Icon className="size-5" /></span><p className="mt-3 text-sm font-semibold">{label} Mode</p><p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">{d}</p></button>)}</div></section>
+      <StudioPanel source={source} processing={processing} onAsk={ask} />
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(300px,0.85fr)_minmax(420px,1fr)_320px]">
         <section className="rounded-[2rem] border border-hairline bg-surface/65 p-5 sm:p-6">
           <div className="flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground/80">Source</p><h2 className="mt-1 font-display text-lg font-semibold">Document library</h2></div><Search className="size-4 text-muted-foreground" /></div>
