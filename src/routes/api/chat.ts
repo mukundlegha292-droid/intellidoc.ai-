@@ -29,6 +29,9 @@ function buildGroundedPrompt({ source, sourceName, mode, question }: { source: s
     "3. If the source is insufficient, say so clearly instead of guessing.",
     "4. Preserve technical notation, chemical equations, formulas, names, numbers, and terminology.",
     "5. Answer directly first, then explain briefly.",
+    "6. Use simple plain text formatting only. Do NOT use Markdown markers such as **, __, #, backticks, or LaTeX delimiters such as $ or $$.",
+    "7. Write chemical equations as readable plain text, for example: 2Cu + O2 → 2CuO.",
+    "8. Use simple labels such as Answer:, Explanation:, and Key point: instead of Markdown headings.",
     `SOURCE CONTENT:\n${source}`,
     "",
     `USER QUESTION:\n${question}`,
@@ -66,6 +69,9 @@ export const Route = createFileRoute("/api/chat")({
                 "For a chemical reaction question, provide the balanced equation when it is supported by the video and explain it briefly.",
                 "If the video truly does not contain the requested information, say: I couldn't find that in the video.",
                 "Never invent timestamps; only mention one when supported by the video input.",
+                "Use simple plain text formatting only. Do NOT use Markdown markers such as **, __, #, backticks, or LaTeX delimiters such as $ or $$.",
+                "Write chemical equations as readable plain text, for example: 2Cu + O2 → 2CuO.",
+                "Use simple labels such as Answer:, Explanation:, and Key point: instead of Markdown headings.",
                 `USER QUESTION:\n${question}`,
               ].join("\n")
             : buildGroundedPrompt({ source, sourceName, mode, question });
