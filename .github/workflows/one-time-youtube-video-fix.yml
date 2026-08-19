@@ -1,0 +1,153 @@
+name: One-time YouTube video fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip youtube video fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply YouTube video source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # ---- import-url.ts ----
+          p = Path('src/routes/api/import-url.ts')
+          t = p.read_text(encoding='utf-8')
+          marker = 'async function resolveSource(rawUrl: string): Promise<SourceResult> {'
+          fast = '''async function resolveSource(rawUrl: string): Promise<SourceResult> {
+            const parsed = validateUrl(rawUrl);
+
+            if (isYouTubeHost(parsed.hostname)) {
+              const videoId = getYouTubeVideoId(rawUrl);
+              const title = (await getYouTubeTitle(rawUrl)) || `YouTube video ${videoId || "source"}`;
+              return {
+                text: "",
+                title,
+                sourceUrl: rawUrl,
+                contentType: "text/x-youtube-video",
+                note: "YouTube video ready for direct AI analysis",
+              };
+            }
+
+'''
+          if marker in t and 'YouTube video ready for direct AI analysis' not in t:
+              t = t.replace(marker, fast, 1)
+          p.write_text(t, encoding='utf-8')
+
+          # ---- chat.ts ----
+          p = Path('src/routes/api/chat.ts')
+          t = p.read_text(encoding='utf-8')
+          t = t.replace(
+              'const sourceName = clean(body?.sourceName, 240) || "Imported source";',
+              'const sourceName = clean(body?.sourceName, 240) || "Imported source";\n          const sourceType = clean(body?.sourceType, 40) || "text";\n          const sourceUrl = clean(body?.sourceUrl, 2_000);',
+              1,
+          )
+          t = t.replace(
+              'if (!source) return Response.json({ error: "Import a source before asking a question." }, { status: 400 });',
+              'const isYouTubeVideo = sourceType === "youtube" && /^https?:\\/\\/(?:www\\.)?(?:youtube\\.com|youtu\\.be)\\//i.test(sourceUrl);\n          if (!source && !isYouTubeVideo) return Response.json({ error: "Import a source before asking a question." }, { status: 400 });\n          if (isYouTubeVideo && !sourceUrl) return Response.json({ error: "The YouTube video URL is missing." }, { status: 400 });',
+              1,
+          )
+          old_prompt = 'const prompt = buildGroundedPrompt({ source, sourceName, mode, question });'
+          new_prompt = '''const prompt = isYouTubeVideo
+            ? [
+                "You are IntelliDoc AI analyzing a public YouTube video directly.",
+                `Workspace mode: ${mode}.`,
+                `Video source: ${sourceName}.`,
+                "Answer from the actual video content. Do not rely on a transcript supplied by the application.",
+                "Use spoken explanations, visible slides/boards, demonstrations, formulas, reactions, examples, and on-screen text.",
+                "If the answer is not present in the video, say: I couldn't find that in the video.",
+                "Never invent timestamps. Mention an approximate timestamp only when supported by the video analysis.",
+                `USER QUESTION:\n${question}`,
+              ].join("\\n")
+            : buildGroundedPrompt({ source, sourceName, mode, question });'''
+          t = t.replace(old_prompt, new_prompt, 1)
+          old_body = '''contents: [{
+                    role: "user",
+                    parts: [{ text: prompt }],
+                  }],'''
+          new_body = '''contents: [{
+                    role: "user",
+                    parts: isYouTubeVideo
+                      ? [
+                          { file_data: { file_uri: sourceUrl } },
+                          { text: prompt },
+                        ]
+                      : [{ text: prompt }],
+                  }],'''
+          t = t.replace(old_body, new_body, 1)
+          t = t.replace(
+              'return Response.json({ answer, model: MODEL, grounded: true, sourceName });',
+              'return Response.json({ answer, model: MODEL, grounded: true, sourceName, sourceType });',
+              1,
+          )
+          p.write_text(t, encoding='utf-8')
+
+          # ---- ai-workspace.tsx ----
+          p = Path('src/routes/ai-workspace.tsx')
+          t = p.read_text(encoding='utf-8')
+          t = t.replace(
+              'type Extracted = { text: string; meta: string; note: string };',
+              'type Extracted = { text: string; meta: string; note: string; sourceType?: "text" | "youtube"; sourceUrl?: string };',
+              1,
+          )
+          t = t.replace(
+              '  const [source, setSource] = useState("");',
+              '  const [source, setSource] = useState("");\n  const [sourceType, setSourceType] = useState<"text" | "youtube">("text");\n  const [sourceUrl, setSourceUrl] = useState("");',
+              1,
+          )
+          t = t.replace(
+              'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);',
+              'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceType(result.sourceType === "youtube" ? "youtube" : "text"); setSourceUrl(result.sourceUrl || ""); setStatus(result.sourceType === "youtube" ? "Video ready" : (result.text ? "Source ready" : result.note));',
+              1,
+          )
+          t = t.replace(
+              'note: typeof data?.note === "string" ? data.note : "URL imported",\n  };',
+              'note: typeof data?.note === "string" ? data.note : "URL imported",\n    sourceType: data?.contentType === "text/x-youtube-video" ? "youtube" : "text",\n    sourceUrl: typeof data?.sourceUrl === "string" ? data.sourceUrl : parsed.toString(),\n  };',
+              1,
+          )
+          t = t.replace(
+              'if (!source) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+              'if (!source && sourceType !== "youtube") { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+              1,
+          )
+          t = t.replace(
+              'body: JSON.stringify({ question: q, source, sourceName: name, mode })',
+              'body: JSON.stringify({ question: q, source, sourceName: name, mode, sourceType, sourceUrl })',
+              1,
+          )
+          t = t.replace(
+              '{source ? <pre className="whitespace-pre-wrap font-sans">{source}</pre> : <p>Import a file or URL to replace this area with real source content.</p>}',
+              '{sourceType === "youtube" && sourceUrl ? <div className="space-y-4"><div className="aspect-video overflow-hidden rounded-2xl border border-hairline bg-black/20"><iframe title={name} src={sourceUrl.replace("watch?v=", "embed/").split("&")[0]} className="h-full w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div><p className="text-sm font-semibold text-foreground">Video source ready</p><p className="text-[11px] leading-5 text-muted-foreground">Ask anything about the video. The AI analyzes the video itself.</p></div> : source ? <pre className="whitespace-pre-wrap font-sans">{source}</pre> : <p>Import a file or URL to replace this area with real source content.</p>}',
+              1,
+          )
+          p.write_text(t, encoding='utf-8')
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build validation
+        run: npm run build
+
+      - name: Commit validated patch and disable this workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/api/import-url.ts src/routes/api/chat.ts src/routes/ai-workspace.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: analyze YouTube URLs directly as video sources [skip youtube video fix]'
+          git push
