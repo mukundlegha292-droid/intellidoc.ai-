@@ -1,0 +1,84 @@
+name: Fast YouTube import once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip fast youtube patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch browser YouTube fast path
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/routes/ai-workspace.tsx')
+          t = p.read_text(encoding='utf-8')
+
+          t = t.replace(
+              'type Extracted = { text: string; meta: string; note: string };',
+              'type Extracted = { text: string; meta: string; note: string; sourceType?: string; sourceUrl?: string };',
+              1,
+          )
+
+          old = '''async function importUrl(url: string, status: (text: string) => void): Promise<Extracted> {\n  const parsed = new URL(url);\n  if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are supported.");\n  status("Fetching URL…");'''
+          new = '''async function importUrl(url: string, status: (text: string) => void): Promise<Extracted> {\n  const parsed = new URL(url);\n  if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are supported.");\n  const host = parsed.hostname.toLowerCase().replace(/^www\\./, "");\n  const isYouTube = host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be";\n  if (isYouTube) {\n    const videoId = host === "youtu.be" ? parsed.pathname.split("/").filter(Boolean)[0] : (parsed.searchParams.get("v") || parsed.pathname.split("/").filter(Boolean)[1] || "");\n    status("YouTube video connected");\n    return {\n      text: "",\n      meta: videoId ? `YouTube video · ${videoId}` : "YouTube video",\n      note: "Video ready for direct AI analysis",\n      sourceType: "youtube",\n      sourceUrl: parsed.toString(),\n    };\n  }\n  status("Fetching URL…");'''
+          if old in t and 'Video ready for direct AI analysis' not in t:
+              t = t.replace(old, new, 1)
+
+          t = t.replace(
+              '    note: typeof data?.note === "string" ? data.note : "URL imported",\n  };',
+              '    note: typeof data?.note === "string" ? data.note : "URL imported",\n    sourceType: typeof data?.contentType === "string" ? data.contentType : "",\n    sourceUrl: typeof data?.sourceUrl === "string" ? data.sourceUrl : parsed.toString(),\n  };',
+              1,
+          )
+
+          t = t.replace(
+              '  const [source, setSource] = useState("");',
+              '  const [source, setSource] = useState("");\n  const [sourceType, setSourceType] = useState("");\n  const [sourceUrl, setSourceUrl] = useState("");',
+              1,
+          )
+
+          t = t.replace(
+              'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);',
+              'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceType(result.sourceType || ""); setSourceUrl(result.sourceUrl || ""); setStatus(result.sourceType === "youtube" ? "Video ready" : (result.text ? "Source ready" : result.note));',
+              1,
+          )
+
+          t = t.replace(
+              'if (!source) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+              'if (!source && !sourceType) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }',
+              1,
+          )
+
+          t = t.replace(
+              'body: JSON.stringify({ question: q, source, sourceName: name, mode })',
+              'body: JSON.stringify({ question: q, source, sourceName: name, mode, sourceType, sourceUrl })',
+              1,
+          )
+
+          p.write_text(t, encoding='utf-8')
+
+      - name: Build check
+        run: npm run build
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/ai-workspace.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "perf: make YouTube import instant and pass video URL to chat [skip fast youtube patch]"
+          git push
+
+      - name: Remove this one-time workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/fast-youtube-import-once.yml || true
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: remove one-time fast YouTube patch workflow [skip fast youtube patch]"
+          git push
