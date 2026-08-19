@@ -7,6 +7,10 @@ function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function isYouTubeUrl(value: string) {
+  return /^https?:\/\/(?:www\.)?(?:youtube\.com|m\.youtube\.com|youtu\.be)\//i.test(value);
+}
+
 export const Route = createFileRoute("/api/suggestions")({
   server: {
     handlers: {
@@ -17,21 +21,23 @@ export const Route = createFileRoute("/api/suggestions")({
 
           const body = await request.json().catch(() => ({}));
           const source = clean(body?.source, MAX_SOURCE_CHARS);
+          const sourceUrl = clean(body?.sourceUrl, 2_000);
           const sourceName = clean(body?.sourceName, 240) || "Imported source";
           const mode = clean(body?.mode, 40) || "student";
+          const youtubeVideo = isYouTubeUrl(sourceUrl);
 
-          if (!source) return Response.json({ suggestions: [] });
+          if (!source && !youtubeVideo) return Response.json({ suggestions: [] });
 
           const prompt = [
-            "You are IntelliDoc AI. Generate smart follow-up questions for an uploaded source.",
+            "You are IntelliDoc AI. Generate smart follow-up questions for an imported source.",
             `Source name: ${sourceName}.`,
             `Workspace mode: ${mode}.`,
-            "Read the supplied source and suggest exactly 5 distinct questions a user would naturally want to ask next.",
-            "Mix question types when appropriate: one big-picture question, one important-detail question, one why/how question, one application or example question, and one exam/review question.",
-            "Make every question answerable from the supplied source. Never invent topics that are absent.",
-            "Questions should be concise, natural, specific to this source, and not repetitive.",
-            "Return ONLY a JSON array of 5 plain strings. No markdown, no explanation.",
-            `SOURCE:\n${source}`,
+            "Suggest exactly 5 distinct questions a user would naturally want to ask next.",
+            "Mix question types when appropriate: big-picture understanding, important detail, why/how, application/example, and exam/review.",
+            "Every question must be answerable from the source/video. Never invent absent topics.",
+            "Questions must be concise, natural, specific to this source, and non-repetitive.",
+            "Return ONLY a JSON array of 5 plain strings. No markdown and no explanation.",
+            youtubeVideo ? "The source is a public YouTube video. Base the questions on the actual video content, not on an application transcript." : `SOURCE:\n${source}`,
           ].join("\n");
 
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
@@ -41,8 +47,14 @@ export const Route = createFileRoute("/api/suggestions")({
               "x-goog-api-key": apiKey,
             },
             body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: { temperature: 0.2, topP: 0.9, maxOutputTokens: 512 },
+              contents: [{
+                role: "user",
+                parts: youtubeVideo ? [
+                  { file_data: { file_uri: sourceUrl } },
+                  { text: prompt },
+                ] : [{ text: prompt }],
+              }],
+              generationConfig: { temperature: 0.25, topP: 0.9, maxOutputTokens: 512 },
             }),
           });
 
@@ -70,7 +82,7 @@ export const Route = createFileRoute("/api/suggestions")({
               .slice(0, 5);
           }
 
-          return Response.json({ suggestions, sourceName });
+          return Response.json({ suggestions, sourceName, sourceType: youtubeVideo ? "youtube" : "text" });
         } catch (error) {
           return Response.json({ error: error instanceof Error ? error.message : "Unable to generate suggestions." }, { status: 500 });
         }
