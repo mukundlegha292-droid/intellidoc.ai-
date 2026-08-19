@@ -1,0 +1,65 @@
+name: One-time suggested questions UI patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'suggestions trigger')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patch workspace
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/ai-workspace.tsx')
+          s = p.read_text()
+          marker = '  const [source, setSource] = useState("");\n'
+          if 'suggestedQuestions' not in s:
+              s = s.replace(marker, marker + '  const [sourceUrl, setSourceUrl] = useState("");\n  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);\n', 1)
+          helper_marker = '  const processResult = (result: Extracted, displayName: string) => {\n'
+          helper = '''  const generateSuggestedQuestions = async (sourceText: string, urlValue: string, displayName: string) => {\n    if (!sourceText && !urlValue) { setSuggestedQuestions([]); return; }\n    try {\n      const response = await fetch("/api/suggestions", {\n        method: "POST",\n        headers: { "content-type": "application/json" },\n        body: JSON.stringify({ source: sourceText, sourceUrl: urlValue, sourceName: displayName, mode }),\n      });\n      const data = await response.json().catch(() => ({}));\n      if (response.ok && Array.isArray(data?.suggestions)) setSuggestedQuestions(data.suggestions.filter((item: unknown): item is string => typeof item === "string").slice(0, 5));\n      else setSuggestedQuestions([]);\n    } catch { setSuggestedQuestions([]); }\n  };\n\n'''
+          if 'const generateSuggestedQuestions' not in s:
+              s = s.replace(helper_marker, helper + helper_marker, 1)
+          old_process = 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setStatus(result.text ? "Source ready" : result.note);\n    setMessages([{ role: "assistant", text: result.text ? `${displayName} is loaded. ${result.note}. The source is ready for the AI layer.` : `${displayName} is connected. ${result.note}.` }]);'
+          new_process = 'setName(displayName); setMeta(`${result.meta} · ${result.note}`); setSource(result.text); setSourceUrl(""); setSuggestedQuestions([]); setStatus(result.text ? "Source ready" : result.note);\n    setMessages([{ role: "assistant", text: result.text ? `${displayName} is loaded. ${result.note}. The source is ready for the AI layer.` : `${displayName} is connected. ${result.note}.` }]);\n    void generateSuggestedQuestions(result.text, "", displayName);'
+          if old_process in s and 'setSourceUrl(""); setSuggestedQuestions([])' not in s:
+              s = s.replace(old_process, new_process, 1)
+          old_url = '    const result = await importUrl(value, setStatus);\n    processResult(result, result.meta || new URL(value).hostname);\n    setShowUrl(false);'
+          new_url = '    const result = await importUrl(value, setStatus);\n    const displayName = result.meta || new URL(value).hostname;\n    processResult(result, displayName);\n    setSourceUrl(value);\n    void generateSuggestedQuestions(result.text, value, displayName);\n    setShowUrl(false);'
+          if old_url in s:
+              s = s.replace(old_url, new_url, 1)
+          old_guard = '    if (!source) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }'
+          new_guard = '    if (!source && !sourceUrl) { setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "Import a file or URL first so I have source material to ground the answer." }]); setQuestion(""); return; }'
+          s = s.replace(old_guard, new_guard, 1)
+          old_body = 'JSON.stringify({ question: q, source, sourceName: name, mode })'
+          new_body = 'JSON.stringify({ question: q, source, sourceUrl, sourceName: name, mode })'
+          s = s.replace(old_body, new_body, 1)
+          studio_marker = '      <StudioPanel source={source} processing={processing} onAsk={ask} />'
+          panel = '''      {suggestedQuestions.length > 0 && (\n        <section className="mt-5 rounded-[2rem] border border-hairline bg-surface/65 p-5">\n          <div className="flex items-center justify-between gap-3">\n            <div><p className="text-[10px] uppercase tracking-[0.2em] text-primary-glow">Suggested questions</p><h3 className="mt-1 text-base font-semibold">Ask something about this source</h3></div>\n            <span className="text-[10px] text-muted-foreground">AI-generated from this source</span>\n          </div>\n          <div className="mt-4 flex flex-wrap gap-2">\n            {suggestedQuestions.map((suggestion) => (\n              <button key={suggestion} onClick={() => ask(suggestion)} className="rounded-2xl border border-hairline bg-background/40 px-3.5 py-2.5 text-left text-xs text-muted-foreground transition hover:border-primary/30 hover:bg-primary/5 hover:text-foreground">{suggestion}</button>\n            ))}\n          </div>\n        </section>\n      )}\n      <StudioPanel source={source} processing={processing} onAsk={ask} />'''
+          if studio_marker in s and 'Suggested questions' not in s:
+              s = s.replace(studio_marker, panel, 1)
+          p.write_text(s)
+          PY
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/ai-workspace.tsx .github/workflows/one-time-suggested-questions.yml
+          git commit -m "feat: add automatic source-grounded suggested questions" || exit 0
+          rm .github/workflows/one-time-suggested-questions.yml
+          git add .github/workflows/one-time-suggested-questions.yml
+          git commit --amend --no-edit
+          git push
